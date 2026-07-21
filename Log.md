@@ -8,5 +8,7 @@
 
 - Floating point number issues are usually why you see larger clifs in the graph, not a data problem. 
 
+- Make sure to import all of the sub stuff you need for species package
+
 
   
