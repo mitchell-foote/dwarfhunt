@@ -16,5 +16,11 @@
 
 - If you get a dwarf that isn't matching the reddening factor you're tracking, it's probably not that factor that's causing the issue. 
 
+- Best place to check the filter names is https://svo2.cab.inta-csic.es/theory/fps/index.php Don't expect them to just be their name.
+
+- There's a difference between the filter value of the filter only, and the whole system. The whole system contains information about QE, throughput, as well as the filter values. 
+
+-  Filter values come back as a 2d array of wavelengths and transmissions
+
 
   
