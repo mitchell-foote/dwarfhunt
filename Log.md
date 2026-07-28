@@ -47,3 +47,27 @@
 - This might be a good example where they're doing some sort of custom model entry, or I'm missing a species param to force it to extrapolate, but I'm not seeing it on my end. I've also checked the original elf-owl paper (https://arxiv.org/pdf/2402.00756) to verify that the wavelength values reported by species are correct. From what I can tell, they are. 
 
 - But looking at the paper Michelson et al 2025, it says they used the library to get that info. Looks like a good time to reach out to Zac / the paper authors to see how they got those values. 
+
+
+- In order to unblock myself, I'm going to try and create the graph with simulated photometry using the sonora-diamondback-highres model. It's smaller, and doesn't have the same, or as many params, so you won't be able to get the same resolution, but at least we'll have enough for the color/color diagram
+
+
+- After doing some looking, I was able to determine that the diamondback model isn't a good fit because it doesn't focus on the cold end of the spectrum. It's not really what I'm looking for here, because it doesn't fit the science I'm testing. 
+
+
+## 2026-07-27
+
+### Staring the week
+- We've got the graph as far as I can go without additional information. 
+- I've reached out to Ashley Messier with a request to get the galaxy information and how to understand how they got the final JWST filter
+- It's time to start jumping on some of the technical learnings that I'll need as well as do some galaxy exploration. Maybe I can find the data in other places. 
+
+### What's blocked, and on whom
+- Blocked on getting the filter data, as well as the Galaxy data. 
+
+### What I learned 
+- One of the issues that I ran into while working on the graph is that we don't have data for some of the points. So we have a grid, but not every point on the grid is filled. 
+- To combat that, we look at the data and only sample from the points we know we have. It makes the graph look segmented, but we can play around with it after I get some of the other data. 
+
+### Next
+- Start on the stats + astro work that I generated to help get me up to speed. 
