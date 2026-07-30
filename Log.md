@@ -71,3 +71,19 @@
 
 ### Next
 - Start on the stats + astro work that I generated to help get me up to speed. 
+
+## 2026-07-29
+
+Heard back from Ashley! She was very helpful and gave some advice on how to get the galaxy models, as well as some pointers for where my exploration can go later in the fall. 
+
+Basically, she's going to reach out to the PI to see how they were able to get the F1550C's filter data to work with the elf-owl models, but also gave me some excellent ideas on how to extend my work by verifying the spread factor on a lot of the new models. Facinating stuff, but stuff that I'll need to check out after I do some replication. 
+
+The specific model she's referening is the brand new exo-remk26 model that just came out this year. The data can be found here: https://lesia.obspm.fr/exorem/YGP_grids/Exo-REMk26/High_Res_grid_2026/R200k_cloudyfsed_2026/
+
+I've also been working on making the galaxy graph, and I've realized that it's often helpful to look at the original author's website instead of a mirror, as the mirror doesn't have to have the complete data set. I ran into this with the SWIRE subset, and the original author's (Polletta) distro. 
+
+I did some research into how Vega can affect the magnitude readings that come back from species. Thankfully this filters out when doing a color-color analysis, as everything is being affected by the same Vega drops in MIR range. However, when you redshift too far, you might run into issues with magnitude adjustments. 
+
+Also dug into the difference between F_λ and νF_ν, and why astronomers like the log log adjusted graphs in νF_ν, as it shows it adjusted for the log scale. 
+
+
