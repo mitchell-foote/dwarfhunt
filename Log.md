@@ -172,3 +172,9 @@ Went back to the elf-owl residual data and binned it by Teff instead of waveleng
 | 525.0 | 20 | -13.9 | 0.9 | 32.8 | 34.0 |
 | 550.0 | 19 | -14.5 | 2.2 | 36.7 | 36.7 |
 
+## 2026-08-01
+
+I think I'm going to try to replicate everything on the color-color graph but with the bobcat model. I know that it doesn't have all of the variables that we can use from the elf-owl model, but it does go into the colder temps that we're looking to track, so it should give us a baseline. Plus it gives us some options for when we expand on the learnings and attempt to grow beyond them. 
+
+I was able to break out the galaxy functions, and claude was able to generalize them across the board, and added some commenting. I build out the overall flow, and was able to build out a graph that showed the connections between the color color graphs. I've verified that in all of the cold ranges, you get some overlapping with the AGN 0.0 redshift, especally once you get around Z = 2
+

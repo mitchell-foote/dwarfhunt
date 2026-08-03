@@ -14,6 +14,7 @@ import numpy as np
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from species.core import constants
+from species.read.read_filter import ReadFilter
 
 # --- deny-list of grid points with no spectrum --------------------------------
 # species stores an all-zero spectrum for any grid point whose model file is
@@ -199,45 +200,178 @@ def flux_and_abs_mag(reader: ReadModel, planet):
     # get_magnitude returns (apparent, absolute)
     return band_flux, reader.get_magnitude(planet)[1] # type: ignore
 
-def update_planet_flux_and_magnitude(model: ReadModel, planet_arrays):
-    flux_model_1065 = ReadModel(model.model, wavel_range=(.61, 14.9), filter_name="JWST/MIRI.F1065C")
-    flux_model_1140 = ReadModel(model.model, wavel_range=(.61, 14.9), filter_name="JWST/MIRI.F1140C")
-    # unable to get this value to do model constraints
-    #flux_model_1550 = ReadModel(model.model, wavel_range=(.61, 14.9), filter_name="JWST/MIRI.F1550C")
 
-    flux_1065, flux_1140 = [], []
-    abs_mag_1065, abs_mag_1140 = [], []
+def filter_label(filter_name):
+    """"JWST/MIRI.F1065C" -> "F1065C". Shared by every flux/mag/color column name."""
+    return filter_name.rsplit(".", 1)[-1]
+
+
+def model_wavel_range(tag, db_path=DB_PATH):
+    """Wavelength coverage (um) actually stored for `tag` in the database.
+
+    Reads just the wavelength dataset (a few thousand floats), not the ~818 MB flux
+    array, so this is cheap enough to call as a precondition check. This is the ground
+    truth for what a grid can support -- ReadModel's own wavel_range argument is not:
+    it's silently overwritten by the filter's own range whenever filter_name is set
+    (see check_filters_fit_model), so it can't be used to detect a mismatch itself.
+    """
+    with h5py.File(db_path, "r") as hdf:
+        wl = hdf[f"models/{tag}/wavelength"]
+        return float(wl[0]), float(wl[-1])
+
+
+def check_filters_fit_model(tag, filter_names, db_path=DB_PATH):
+    """Raise ValueError for any filter whose bandpass falls outside `tag`'s grid.
+
+    Elf Owl (0.61-14.9um) can't support JWST/MIRI.F1550C (14.912-16.219um) for exactly
+    this reason -- the grid stops 12nm short of where the filter starts. Bobcat
+    (0.61-17.0um) covers it fine. Failing fast here beats the "math domain error" that
+    would otherwise surface deep inside get_magnitude.
+    """
+    model_lo, model_hi = model_wavel_range(tag, db_path=db_path)
+
+    for name in filter_names:
+        filt_lo, filt_hi = ReadFilter(name).wavelength_range()
+        if filt_lo < model_lo or filt_hi > model_hi:
+            raise ValueError(
+                f"{tag} covers {model_lo:.3f}-{model_hi:.3f} um but {name} needs "
+                f"{filt_lo:.3f}-{filt_hi:.3f} um. Re-add the model with a wider "
+                "wavel_range, or drop this filter for this model."
+            )
+
+
+def update_planet_flux_and_magnitude(
+    model: ReadModel,
+    planet_arrays,
+    filter_names=("JWST/MIRI.F1065C", "JWST/MIRI.F1140C"),
+):
+    """Add per-filter flux_{label} and abs_mag_{label} columns to `planet_arrays`.
+
+    filter_names can be any length -- pass all three MIRI coronagraph filters for
+    Bobcat, or just the two that fit Elf Owl's narrower grid (see
+    check_filters_fit_model). Color columns are not computed here; call
+    add_color_columns on the result.
+    """
+    check_filters_fit_model(model.model, filter_names)
+
+    # wavel_range is not passed here: ReadModel overwrites it from the filter's own
+    # range whenever filter_name is set, so passing one would be dead code.
+    readers = [ReadModel(model.model, filter_name=name) for name in filter_names]
+    labels = [filter_label(name) for name in filter_names]
+
+    flux_cols = {label: [] for label in labels}
+    mag_cols = {label: [] for label in labels}
 
     with skip_nearest_spec_check():
-        planet_count = 0
         # get_flux/get_magnitude take one planet at a time, so walk the rows
         for planet in iter_planets(planet_arrays):
-            planet_flux_1065, planet_mag_1065 = flux_and_abs_mag(flux_model_1065, planet)
-            planet_flux_1140, planet_mag_1140 = flux_and_abs_mag(flux_model_1140, planet)
-            # unable to get this value to do model constraints
-            #flux_1550.append(flux_model_1550.get_flux(planet)[0])
-
-            flux_1065.append(planet_flux_1065)
-            flux_1140.append(planet_flux_1140)
-            abs_mag_1065.append(planet_mag_1065)
-            abs_mag_1140.append(planet_mag_1140)
-            planet_count += 1
+            for reader, label in zip(readers, labels):
+                planet_flux, planet_mag = flux_and_abs_mag(reader, planet)
+                flux_cols[label].append(planet_flux)
+                mag_cols[label].append(planet_mag)
 
     out = dict(planet_arrays)
-    out['flux_1065C'] = np.array(flux_1065)
-    out['flux_1140C'] = np.array(flux_1140)
-    # unable to get this value to do model constraints
-    #out['flux_1550C'] = np.array(flux_1550)
-    out['abs_mag_1065'] = np.array(abs_mag_1065)
-    out['abs_mag_1140'] = np.array(abs_mag_1140)
+    for label in labels:
+        out[f"flux_{label}"] = np.array(flux_cols[label])
+        out[f"abs_mag_{label}"] = np.array(mag_cols[label])
 
-    out['F1065C - F1140C'] = out['abs_mag_1065'] - out['abs_mag_1140']
-
-    dropped = int(np.count_nonzero(np.isnan(out['F1065C - F1140C'])))
+    dropped = int(np.count_nonzero([np.isnan(out[f"abs_mag_{label}"]) for label in labels]))
     if dropped:
-        print(f"{model.model}: {dropped} planets had no usable spectrum and are plotted as gaps")
+        print(f"{model.model}: {dropped} planet/filter magnitudes had no usable spectrum and are gaps")
 
     return out
+
+
+def color_pairs(mags_by_filter, order=None):
+    """Every pairwise magnitude difference, bluer minus redder, short wavelength first.
+
+    mags_by_filter : dict, filter label -> magnitude (scalar or ndarray)
+        e.g. {"F1065C": m1, "F1140C": m2, "F1550C": m3}. Works unchanged on scalars
+        (one galaxy template at one redshift) or ndarrays (a batch of planets),
+        since it's pure subtraction.
+    order : sequence of labels, optional
+        Pins the pair ordering. Defaults to mags_by_filter's insertion order, i.e.
+        the order filter_names was given in.
+
+    Returns
+    -------
+    dict, "{blue} - {red}" -> difference, one entry per i < j pair.
+    """
+    labels = list(order) if order is not None else list(mags_by_filter.keys())
+    return {
+        f"{labels[i]} - {labels[j]}": mags_by_filter[labels[i]] - mags_by_filter[labels[j]]
+        for i in range(len(labels))
+        for j in range(i + 1, len(labels))
+    }
+
+
+def add_color_columns(planet_data, filter_names=None):
+    """Return a copy of `planet_data` with every pairwise color column added.
+
+    planet_data : dict
+        Output of update_planet_flux_and_magnitude (or anything with abs_mag_{label}
+        keys). teff/logg/radius/flux_* etc. all pass through unchanged, so this stays
+        one flat table per model -- what plotting and the eventual galaxy merge want.
+    filter_names : list of filter labels, optional
+        Restrict/order which abs_mag_{label} columns are combined, e.g.
+        ["F1065C", "F1140C", "F1550C"]. Defaults to every abs_mag_* column present,
+        in insertion order.
+
+    Colors are differences, so this is safe to compare against the galaxy notebook's
+    apparent-magnitude colors even though planets here use absolute magnitude -- the
+    distance modulus cancels either way.
+    """
+    prefix = "abs_mag_"
+    if filter_names is None:
+        filter_names = [key[len(prefix):] for key in planet_data if key.startswith(prefix)]
+
+    mags_by_filter = {label: planet_data[f"{prefix}{label}"] for label in filter_names}
+
+    out = dict(planet_data)
+    out.update(color_pairs(mags_by_filter, order=filter_names))
+    return out
+
+
+def color_color_matrix(planet_data, color_names=None):
+    """Stack this model's color columns into one (n_planets, n_colors) array.
+
+    add_color_columns leaves colors as separate dict entries ("F1065C - F1140C",
+    "F1140C - F1550C", ...), convenient for name-based lookup but awkward for
+    scatter code that wants to index by column position -- see
+    michelson-galaxy-graph.ipynb's plot_color_color, which does exactly that
+    against a per-galaxy [F1065-F1140, F1140-F1550, F1065-F1550] tuple. This is the
+    batched, planet-array equivalent: one row per planet instead of one tuple per
+    galaxy/redshift, indexed the same way.
+
+    Parameters
+    ----------
+    planet_data : dict
+        Output of add_color_columns -- needs one array per color, keyed "A - B".
+    color_names : list of str, optional
+        Which color columns to stack, and in what order, e.g.
+        ["F1065C - F1140C", "F1140C - F1550C", "F1065C - F1550C"] to match the
+        galaxy notebook's axis order. Defaults to every "A - B" key present, in
+        insertion order.
+
+    Returns
+    -------
+    color_names : list[str]
+        Resolved column order -- color_names[j] labels colors[:, j].
+    colors : ndarray, shape (n_planets, n_colors)
+
+    Example
+    -------
+    >>> names, colors = color_color_matrix(planet_colors)
+    >>> x = colors[:, names.index("F1065C - F1140C")]
+    >>> y = colors[:, names.index("F1065C - F1550C")]
+    >>> ax.scatter(x, y, c=planet_colors["teff"], cmap="viridis")
+    """
+    if color_names is None:
+        color_names = [key for key in planet_data if " - " in key]
+
+    colors = np.column_stack([np.atleast_1d(planet_data[name]) for name in color_names])
+    return color_names, colors
+
 
 def check_power_law(predicted_flux: np.ndarray, actual_flux: np.ndarray):
     # predicted_flux and actual_flux cover the same wavelengths, so this is how far
