@@ -178,3 +178,16 @@ I think I'm going to try to replicate everything on the color-color graph but wi
 
 I was able to break out the galaxy functions, and claude was able to generalize them across the board, and added some commenting. I build out the overall flow, and was able to build out a graph that showed the connections between the color color graphs. I've verified that in all of the cold ranges, you get some overlapping with the AGN 0.0 redshift, especally once you get around Z = 2
 
+## 2026-08-03
+
+I heard back from Dr. Pope! She was able to send me the templates that the Michelson paper was using! I'm going to start digging into the data, and see if I can replace the SWIRE Templates with the real Pope data. 
+
+I build out replacements for the k15 data, with the notable change of how they measure the flux. F_v instead of F_y, so we'll need to do a translation there. You can see the full end to end flow in the function translate_k15_L_v_to_f_lambda
+
+With some help from claude, I was able to copy over the format of the Michelson graph, into the graph I created. 
+
+Based on additional information that I dug through, it looks like my previous use of the swire Mrk231 as the 0.5 was incorrect, leading to a graph that had errors, with the updated graph, I have the full data that was used in the graphs. 
+
+Based on that, I'm going to use the MIR_library MIR 0.0, 0.5, and 1.0 files for my lines. 
+
+After graphing them, I've noticed that the lines are shifted. The general shapes are correct, my graph has more samples so you get more curves in the lines, but they're moved from -.42 -> 1.42 where theirs (eyeballing) is 0.0 -> 2.4. Odd. My next plan is to dig in and figure out where that difference lies, and make sure I don't have any issues in my codebase / helper functions. 

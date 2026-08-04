@@ -1,9 +1,14 @@
-"""Galaxy SWIRE-template helpers, moved out of michelson-galaxy-graph.ipynb.
+"""Galaxy template helpers (SWIRE and Kirkpatrick+2015), moved out of
+michelson-galaxy-graph.ipynb.
 
 Mirrors generate_planet_list.py's shape: load a template, redshift it, synthesize
 per-filter magnitudes, then hand the magnitudes to that module's color_pairs so
 planets and galaxies compute colors the same way.
+
+Data only -- the drawing lives in color_color_plots.py.
 """
+
+from itertools import combinations
 
 import numpy as np
 from species.phot.syn_phot import SyntheticPhotometry
@@ -108,35 +113,6 @@ def get_full_redshift_mag_loop(file, filter_names=DEFAULT_FILTERS, redshifts=DEF
     return full_mag_data
 
 
-def plot_color_color(data, title, ax, color, x_idx, y_idx, x_label, y_label):
-    """Scatter one template's color-color track, colored by redshift.
-
-    Accepts either shape this module produces:
-    - dict from galaxy_color_color_data -- x/y are looked up directly by
-      x_label/y_label (its "A - B" keys), x_idx/y_idx are unused.
-    - list of (z, mag_array, color_color_data) tuples from
-      get_full_redshift_mag_loop -- x_idx/y_idx index into each row's
-      color_color_data (0=F1065C-F1140C, 1=F1140C-F1550C, 2=F1065C-F1550C).
-
-    Feeding the dict shape into the x_idx/y_idx path used to fail with
-    "string index out of range": iterating a dict walks its string keys, not
-    rows, so item[2] grabbed a single character instead of a color value.
-    """
-    if isinstance(data, dict):
-        z_values = data["redshift"]
-        x = data[x_label]
-        y = data[y_label]
-    else:
-        z_values = [item[0] for item in data]
-        color_color_data = [item[2] for item in data]
-        x = [item[x_idx] for item in color_color_data]
-        y = [item[y_idx] for item in color_color_data]
-
-    #ax.scatter(x, y, c=z_values, cmap='viridis', s=30)
-    ax.plot(x, y, color=color, alpha=0.3, label=title)
-    ax.set_xlabel(x_label); ax.set_ylabel(y_label); ax.legend()
-
-
 def galaxy_color_color_data(file, filter_names=DEFAULT_FILTERS, redshifts=DEFAULT_REDSHIFTS):
     """One call: load a SWIRE template and build every flux/color column across `redshifts`.
 
@@ -181,3 +157,131 @@ def galaxy_color_color_data(file, filter_names=DEFAULT_FILTERS, redshifts=DEFAUL
     out.update({f"mag_{label}": arr for label, arr in mag_cols.items()})
     out.update(color_pairs(mag_cols, order=labels))
     return out
+
+
+
+def load_k15_data(file): 
+    """
+    Load the K15 data from a .txt file, which has the following columns
+    1. Wavelength (in Microns)
+    2. Brightness per unit frequency 
+    3. Error bar on the brightness per unit frequency
+
+    The file has three header lines that should be skipped.
+    """
+    data = np.loadtxt(file, comments='#', skiprows=3, usecols=(0, 1, 2))
+    wavelengths = data[:, 0]
+    fluxes = data[:, 1]
+    errors = data[:, 2]
+    return wavelengths, fluxes, errors
+
+def redshift_k15_data(wavelengths, fluxes, z):
+    """
+    Redshift the K15 data by a given redshift z.
+
+    Parameters:
+    - wavelengths: array of wavelengths in microns
+    - fluxes: array of fluxes 
+    - z: redshift value
+
+    Returns:
+    - redshifted_wavelengths: array of redshifted wavelengths in microns
+    - redshifted_fluxes: array of redshifted fluxes 
+    """
+    redshifted_wavelengths = wavelengths * (1 + z)
+    redshifted_fluxes = fluxes
+    return redshifted_wavelengths, redshifted_fluxes
+
+def translate_k15_L_v_to_f_lambda(wavelengths, fluxes):
+    """
+    Translate K15 data from L_v to f_lambda.
+
+    Parameters:
+    - wavelengths: array of wavelengths in microns
+    - fluxes: array of fluxes in L_v
+
+    Returns:
+    - translated_fluxes: array of fluxes in f_lambda
+    """
+    wavelengths_m = wavelengths 
+    # Convert L_v to f_lambda using the relation f_lambda = (L_v * c) / (lambda^2)
+    c = 2.99792458e14  # Speed of light in microns/s
+    translated_fluxes = (fluxes * c) / (wavelengths_m ** 2)
+    return translated_fluxes
+
+def synth_mags_k15(wavelength, flux, filter_names):
+    """
+    Calculate synthetic magnitudes for a given list of filters using K15 data.
+
+    spectrum_to_magnitude returns ((apparent, error), (absolute, error)); this keeps
+    only the apparent-magnitude tuple per filter, same as the original notebook cell
+    -- callers that just want the scalar apparent magnitude take item[0] of each
+    entry (see get_full_redshift_mag_loop and galaxy_color_color_data below).
+    """
+    mag_list = []
+    for filter_name in filter_names:
+        filters_data = SyntheticPhotometry(filter_name).spectrum_to_magnitude(wavelength, flux)
+        mag_list.append(filters_data[0])
+    return mag_list
+
+def get_full_redshift_mag_loop_k15(file, filter_names=DEFAULT_FILTERS, redshifts=DEFAULT_REDSHIFTS):
+    """
+    Load K15 `file`, redshift it across the redshift values, then translate to values species needs, and synthesize per-filter magnitudes.
+
+    Returns a list of (z, mag_array, color_color_data) tuples, one per redshift --
+    the shape plot_color_color expects.
+    """
+    wavelengths, fluxes, errors = load_k15_data(file)
+    # Redshift the data
+    full_mag_data = []
+    for z in redshifts:
+        red_wavelengths, red_fluxes = redshift_k15_data(wavelengths, fluxes, z)
+        # Translate to f_lambda
+        translated_fluxes = translate_k15_L_v_to_f_lambda(red_wavelengths, red_fluxes)
+        mag_data = synth_mags(red_wavelengths, translated_fluxes, filter_names)
+        # synth_mags keeps the (apparent, error) tuple per filter; drop the error
+        un_tupled_data = [item[0] for item in mag_data]
+        color_color = get_color_color_data(un_tupled_data)
+        full_mag_data.append((z, un_tupled_data, color_color))
+    
+    return full_mag_data
+
+def galaxy_color_color_data_k15(file, filter_names=DEFAULT_FILTERS, redshifts=DEFAULT_REDSHIFTS):
+    """One call: load a K15 template and build every flux/color column across `redshifts`.
+
+    Parameters
+    ----------
+    file : str or Path
+        K15 template file, e.g. "./galaxy-data/K15_templates/MIR_library/MIRO0.0.txt".
+    filter_names : sequence of str
+        Full species filter names. Defaults to the three MIRI coronagraph filters.
+    redshifts : sequence of float
+        Redshift grid to evaluate at. Defaults to 90 steps from z=0.5 to 2.
+
+    Returns
+    -------
+    dict with:
+        "file" : str, the input path (for labeling plots/legends)
+        "redshift" : ndarray, shape (n_z,)
+        "mag_{label}" : ndarray, shape (n_z,), one per filter, e.g. "mag_F1065C"
+        "{label_i} - {label_j}" : ndarray, shape (n_z,), one per filter pair
+    """
+    wavelengths, fluxes, errors = load_k15_data(file)
+    labels = [filter_label(name) for name in filter_names]
+
+    mag_cols = {label: [] for label in labels}
+    for z in redshifts:
+        red_wavelengths, red_fluxes = redshift_k15_data(wavelengths, fluxes, z)
+        # Translate to f_lambda
+        translated_fluxes = translate_k15_L_v_to_f_lambda(red_wavelengths, red_fluxes)
+        mags = synth_mags(red_wavelengths, translated_fluxes, filter_names)
+        # synth_mags keeps the (apparent, error) tuple per filter; drop the error
+        for label, (mag, _mag_error) in zip(labels, mags):
+            mag_cols[label].append(mag)
+
+    result = {"file": str(file), "redshift": np.array(redshifts)}
+    for label, mag_list in mag_cols.items():
+        result[f"mag_{label}"] = np.array(mag_list)
+    for label_i, label_j in combinations(labels, 2):
+        result[f"{label_i} - {label_j}"] = result[f"mag_{label_i}"] - result[f"mag_{label_j}"]
+    return result
