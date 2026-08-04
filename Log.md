@@ -191,3 +191,35 @@ Based on additional information that I dug through, it looks like my previous us
 Based on that, I'm going to use the MIR_library MIR 0.0, 0.5, and 1.0 files for my lines. 
 
 After graphing them, I've noticed that the lines are shifted. The general shapes are correct, my graph has more samples so you get more curves in the lines, but they're moved from -.42 -> 1.42 where theirs (eyeballing) is 0.0 -> 2.4. Odd. My next plan is to dig in and figure out where that difference lies, and make sure I don't have any issues in my codebase / helper functions. 
+
+## 2026-08-04
+
+I want to go through and do a seperate implementation for the Synthetic Photometry outside of `species`, just to make sure that my math checks out, and that I don't have any artifacts that are causing the shift between my AGN 0.0 difference. 
+
+After doing some research, the best way would probably be to calculate the mag directly with Vega, translating it based on the filter wavelengths. 
+
+We've got Vega's spectrum located at data/alpha_lyr_stis_11.fits, after checking the header, we see the target is HD172167 (Vega), so we've got the correct data. 
+
+With this, we can use the following python function to synthetically calculate the magnitude
+
+```python
+
+  def synth(wl, fl, filt, mode):
+      prof = ReadFilter(filt).get_filter()          # 1. get the filter curve
+      fw, ft = prof[:,0], prof[:,1]                 #    wavelengths, transmission
+
+      g = np.interp(fw, wl, fl, left=0, right=0)    # 2. resample galaxy onto filter grid
+      v = np.interp(fw, vw, vf, left=0, right=0)    #    resample Vega onto the same grid
+
+      wgt = ft*fw if mode=='photon' else ft         # 3. build the weighting
+
+      return -2.5*np.log10(np.trapezoid(g*wgt, fw)  # 4. ratio of weighted integrals
+                         / np.trapezoid(v*wgt, fw)) + 0.03
+
+```
+
+There are two methods to build out weighting: photon + energy, we want to check both, because we don't know which one `species` uses under the hood, doing this may also help us determine why we have such a large diff in the Michelson color-color data. 
+
+After running this function on both modes, they agree with each other to about 0.002 mag, so either way, we should be good to use either photon or energy. It also validates our data, including the -0.41 color color dip. With some digging, it looks like that's where the PAH line is, which makes sense why we have such a deviation there. 
+
+It's possible that the sampling on the Michelson paper just missed those values, or they used different galaxy files, but overall, the math we've done in the project checks out. 
