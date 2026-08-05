@@ -223,3 +223,31 @@ There are two methods to build out weighting: photon + energy, we want to check 
 After running this function on both modes, they agree with each other to about 0.002 mag, so either way, we should be good to use either photon or energy. It also validates our data, including the -0.41 color color dip. With some digging, it looks like that's where the PAH line is, which makes sense why we have such a deviation there. 
 
 It's possible that the sampling on the Michelson paper just missed those values, or they used different galaxy files, but overall, the math we've done in the project checks out. 
+
+
+### 2026-08-05
+
+I also started working on the GMM for the galaxies vs the dwarf planets. After running an initial pop=2 GMM with the color-color data, I generated a confusion matrix. 
+
+> As a note, this is a time where I trained and scored on the same data just to have a baseline. In the future, I'll be using different subsets to score the fit. 
+
+The confusion matrix came back with a suprizing result. 
+
+```
+[
+  [56, 44]
+  [40, 230]
+]
+```
+
+Meaning, we got 56 / 100 brown dwarfs correct, and 230 / 270 galaxies correct. 
+
+With that we got a ~ .706 balanced accuracy result.
+
+I'm going to clean up the result, and create some helper functions to be able to easilly extend this past the color filters we currently have. 
+
+I'm also going to break down the notebook so that we're not scoring on data we fit with, and then afterwards check which dwarfs are failing the fit. 
+
+
+
+
