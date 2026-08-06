@@ -16,8 +16,9 @@ Styled to match the Michelson figure:
 import numpy as np
 from matplotlib import colormaps
 from matplotlib.collections import LineCollection
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 from matplotlib.lines import Line2D
+from matplotlib.patches import Ellipse
 
 
 def _clip_cmap(name, lo, hi, label):
@@ -168,3 +169,150 @@ def add_figure_scales(fig, axes, dwarf_handle, galaxy_handle,
     axes[legend_ax].legend(handles=handles, loc="upper right", frameon=True,
                            framealpha=0.9, fontsize=9)
     return cax_galaxy, cax_dwarf
+
+
+def _covariances_2d(gm):
+    """Normalize any GaussianMixture covariance_type to (n_components, 2, 2).
+
+    sklearn stores covariances in four different shapes depending on
+    covariance_type ("full": (K,2,2), "tied": (2,2), "diag": (K,2), "spherical":
+    (K,)); the ellipse math below needs a full 2x2 per component regardless of
+    which one was used to fit, otherwise it only happens to work for "full".
+    """
+    cov = gm.covariances_
+    k = gm.n_components
+    if gm.covariance_type == "full":
+        return cov
+    if gm.covariance_type == "tied":
+        return np.broadcast_to(cov, (k, *cov.shape)).copy()
+    if gm.covariance_type == "diag":
+        out = np.zeros((k, 2, 2))
+        out[:, 0, 0] = cov[:, 0]
+        out[:, 1, 1] = cov[:, 1]
+        return out
+    if gm.covariance_type == "spherical":
+        out = np.zeros((k, 2, 2))
+        out[:, 0, 0] = cov
+        out[:, 1, 1] = cov
+        return out
+    raise ValueError(f"unrecognized covariance_type: {gm.covariance_type!r}")
+
+
+def class_color_map(classes):
+    """Fixed class -> color assignment, shared by every class-colored plot
+    here (component ellipses, decision regions).
+
+    Both call this with the same `classes` array when the caller doesn't pin
+    its own class_colors, so ellipses, the decision-region background, and
+    the scattered points always agree on which color means which class --
+    passing a colormap name straight to contourf does not give that
+    guarantee (see plot_decision_regions).
+    """
+    cycle = colormaps["tab10"].colors
+    return {c: cycle[i % len(cycle)] for i, c in enumerate(sorted(classes))}
+
+
+def plot_component_ellipses(ax, gm, comp_to_class=None, class_colors=None,
+                            n_std=2, linewidth=1.4):
+    """Draw each GMM component as a covariance ellipse.
+
+    Built for the K-components-per-curve GMMClassifier in gmm_classify.py --
+    this is how you actually see whether the fitted components are tiling a
+    population's curve or cutting across it, rather than just reading off an
+    aggregate accuracy number.
+
+    Parameters
+    ----------
+    ax : matplotlib Axes
+    gm : sklearn.mixture.GaussianMixture (already fit, 2 features)
+    comp_to_class : ndarray, shape (n_components,), optional
+        Component -> class assignment from gmm_classify.component_class_map
+        or GMMClassifier.comp_to_class_. Colors ellipses by class instead of
+        by component index when given.
+    class_colors : dict, class -> color, optional
+        Only used when comp_to_class is given. Defaults to matplotlib's
+        default color cycle, keyed by sorted class value.
+    n_std : float
+        Ellipse radius in standard deviations (2 ~ 95% contour for a 2-D
+        Gaussian).
+
+    Returns
+    -------
+    list of Ellipse patches added to ax, one per component.
+    """
+    covariances = _covariances_2d(gm)
+    means = gm.means_
+    weights = gm.weights_
+    max_weight = weights.max() if len(weights) else 1.0
+
+    if comp_to_class is not None and class_colors is None:
+        class_colors = class_color_map(set(comp_to_class))
+
+    patches = []
+    for k in range(gm.n_components):
+        vals, vecs = np.linalg.eigh(covariances[k])
+        vals = np.clip(vals, 0, None)  # guard tiny negative round-off
+        order = vals.argsort()[::-1]
+        vals, vecs = vals[order], vecs[:, order]
+        angle = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
+        width, height = 2 * n_std * np.sqrt(vals)
+
+        color = "0.35" if comp_to_class is None else class_colors[comp_to_class[k]]
+        ellipse = Ellipse(means[k], width, height, angle=angle,
+                          facecolor=color, edgecolor=color,
+                          alpha=0.15 + 0.35 * (weights[k] / max_weight),
+                          linewidth=linewidth, zorder=2.5)
+        ax.add_patch(ellipse)
+        patches.append(ellipse)
+    return patches
+
+
+def plot_decision_regions(ax, clf, X, y, resolution=300, class_colors=None,
+                          point_alpha=0.7):
+    """Shade the color-color plane by predicted class and scatter the real
+    points on top.
+
+    clf needs a .predict(X) -> class array method (GMMClassifier from
+    gmm_classify.py fits this directly). Only meaningful in 2 features, since
+    it shades the axes' own plane.
+
+    Builds the meshgrid from the *current* axis limits via get_xlim/get_ylim
+    rather than assuming ascending order, so this still works after
+    style_panel has inverted the y axis for the magnitude convention.
+
+    class_colors : dict, class -> color, optional
+        Defaults to class_color_map(classes). Pass the same dict used for
+        plot_component_ellipses's comp_to_class coloring to keep background,
+        ellipses, and scattered points in agreement -- handing a named
+        colormap straight to contourf does *not* give that for free: contourf
+        normalizes across the colormap's full range, so with e.g. "tab10" (10
+        entries) and only 2 classes it can pick two arbitrary, non-adjacent
+        colors instead of the map's first two.
+    """
+    X = np.asarray(X)
+    y = np.asarray(y)
+    if X.shape[1] != 2:
+        raise ValueError(f"plot_decision_regions needs 2 feature columns, got {X.shape[1]}")
+
+    classes = np.unique(y)
+    if class_colors is None:
+        class_colors = class_color_map(classes)
+
+    x_lo, x_hi = sorted(ax.get_xlim())
+    y_lo, y_hi = sorted(ax.get_ylim())
+    xx, yy = np.meshgrid(np.linspace(x_lo, x_hi, resolution),
+                         np.linspace(y_lo, y_hi, resolution))
+    grid_pred = clf.predict(np.column_stack((xx.ravel(), yy.ravel())))
+
+    class_index = {c: i for i, c in enumerate(classes)}
+    zz = np.vectorize(class_index.get)(grid_pred).reshape(xx.shape)
+
+    region_cmap = ListedColormap([class_colors[c] for c in classes])
+    ax.contourf(xx, yy, zz, levels=np.arange(len(classes) + 1) - 0.5,
+               cmap=region_cmap, alpha=0.25, zorder=0)
+    for c in classes:
+        mask = y == c
+        ax.scatter(X[mask, 0], X[mask, 1], color=class_colors[c], s=16,
+                  alpha=point_alpha, edgecolors="0.25", linewidths=0.3,
+                  zorder=3, label=str(c))
+    return ax

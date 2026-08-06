@@ -225,7 +225,7 @@ After running this function on both modes, they agree with each other to about 0
 It's possible that the sampling on the Michelson paper just missed those values, or they used different galaxy files, but overall, the math we've done in the project checks out. 
 
 
-### 2026-08-05
+## 2026-08-05
 
 I also started working on the GMM for the galaxies vs the dwarf planets. After running an initial pop=2 GMM with the color-color data, I generated a confusion matrix. 
 
@@ -254,7 +254,21 @@ Turns out, we're looking at something multi-modal, with one peak at .5, and anot
 
 This tells me that sometimes that model finds something helpful that classifies things, or sometimes it finds a local max, which doesn't help classify at all. 
 
-Ah, I see what I did here. For the GMM model, I wasn't using the `n_components` parameter. When I added a `n_components=10`, it was able to pull it back up to about .7, which is nice because bad solution doesn't win on likelihood. We'll make sure to use those params in all future calculations. 
+Ah, I see what I did here. For the GMM model, I wasn't using the `n_init` parameter. When I added a `n_init=10`, it was able to pull it back up to about .7, which is nice because bad solution doesn't win on likelihood. We'll make sure to use those params in all future calculations. 
 
 Next step is to make a larger population for the GMM as the dwarfs are a curve, not a blob. 
 
+## 2026-08-06
+
+I took the functions that I have made, and with claude's help created a new python helper class that can how handle GMMs of various components K, with different proportions and quantity of populations. Thus, we can have a model that goes through and add `n_components`, while still being able to score based on our known two populations. This is super helpful, because it should be able to help us fit our curved brown dwarf data much better than a simple 2 component model.
+
+In fact, it's so much better that after running with `n_components=6` , we get the following matrix back. 
+
+[
+  [100 ,  0]
+  [5.  , 63]
+]
+
+Which comes out to a whopping ~.97 balanced accuracy score. Much better than the .7. Here's what this data tells me though. If the current model says something is a galaxy, it's going to be a galaxy, but if something tells you it's a brown dwarf, there's still a small chance that it could be a galaxy. I went through and added some images to the notebook to showcase where those dots were located, and verified that it's located in the cooler tail of the brown dwarf/galaxy overlap. 
+
+Basically, I've done a good job at proving the problem exists, and will require more data points to be able to effectivly seperate them. This leads into the question of which kinds of data will be most effective. I'm meeting with Zac tomorrow afternoon, hopefully we can chat about good next steps moving forward. I'm still waiting to hear back from Ashley to see how Michelson was able to get the elf-owl model working on wavelengths that the model didn't cover. Hopefully we have a fix for that soon. 
