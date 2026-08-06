@@ -248,6 +248,13 @@ I'm going to clean up the result, and create some helper functions to be able to
 
 I'm also going to break down the notebook so that we're not scoring on data we fit with, and then afterwards check which dwarfs are failing the fit. 
 
+Ok, so I re-ran the model with a different seed and got a result of ~.5 (or basically chance). After this, I created 20 seeds and ran them all through to determine what kind of distribution we have. 
 
+Turns out, we're looking at something multi-modal, with one peak at .5, and another at .69. We tested 20 different seeds, and didn't really get any values in the valley between them. 
 
+This tells me that sometimes that model finds something helpful that classifies things, or sometimes it finds a local max, which doesn't help classify at all. 
+
+Ah, I see what I did here. For the GMM model, I wasn't using the `n_components` parameter. When I added a `n_components=10`, it was able to pull it back up to about .7, which is nice because bad solution doesn't win on likelihood. We'll make sure to use those params in all future calculations. 
+
+Next step is to make a larger population for the GMM as the dwarfs are a curve, not a blob. 
 
