@@ -272,3 +272,16 @@ In fact, it's so much better that after running with `n_components=6` , we get t
 Which comes out to a whopping ~.97 balanced accuracy score. Much better than the .7. Here's what this data tells me though. If the current model says something is a galaxy, it's going to be a galaxy, but if something tells you it's a brown dwarf, there's still a small chance that it could be a galaxy. I went through and added some images to the notebook to showcase where those dots were located, and verified that it's located in the cooler tail of the brown dwarf/galaxy overlap. 
 
 Basically, I've done a good job at proving the problem exists, and will require more data points to be able to effectivly seperate them. This leads into the question of which kinds of data will be most effective. I'm meeting with Zac tomorrow afternoon, hopefully we can chat about good next steps moving forward. I'm still waiting to hear back from Ashley to see how Michelson was able to get the elf-owl model working on wavelengths that the model didn't cover. Hopefully we have a fix for that soon. 
+
+## 2026-08-10
+
+I'm currently on vacation, which is why you're seeing a bit of a jump. First thing, after the meeting with Zac, it's time to use some additional filtering to spilt apart the populations further. But as I begin on that front, I want to take care of two things. 
+
+First, I want to make sure that I'm not overfitting the model, and if I am, make sure that we modify the model to the best BIC values we can get. Currently we're at ~.975, but that number doesn't mean much if it's overfit. 
+
+Second, I want to close the loop on the galaxy side, building out some graphs showcasewith which values failed classification, similar to what I did with the brown dwarfs. Claude seems very capable in generating those graphs, so I'll have it build out those based on the data we already have. 
+
+--
+
+Now that we have the graphs and did some rerunning. Looks like K is best at 5, not 6, so we were overfitting a bit, this moves our average down to .975 ± 0.013. Which is fine, because now I'm a bit more confident in those numbers. I also built out the Galaxy graphs, which are showing some misalignment around the beginning of the redshift tables (z < 1), but also in the 0.5 and 0.0 AGN templates. What I want to do now is increase the amount of samples that are provided to the model, and see if those values stand up. I'm wondering if we add more points if we can change that number one way or another. Once we have that done, it's time to start adding filters. 
+
