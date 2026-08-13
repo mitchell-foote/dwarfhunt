@@ -285,3 +285,6 @@ Second, I want to close the loop on the galaxy side, building out some graphs sh
 
 Now that we have the graphs and did some rerunning. Looks like K is best at 5, not 6, so we were overfitting a bit, this moves our average down to .975 ± 0.013. Which is fine, because now I'm a bit more confident in those numbers. I also built out the Galaxy graphs, which are showing some misalignment around the beginning of the redshift tables (z < 1), but also in the 0.5 and 0.0 AGN templates. What I want to do now is increase the amount of samples that are provided to the model, and see if those values stand up. I'm wondering if we add more points if we can change that number one way or another. Once we have that done, it's time to start adding filters. 
 
+## 2026-08-12
+
+Because we're now moving over to a new phase of work, I'm going to refactor the repo so that we have the helper functions + db available for all notebooks moving forward. I'll also have claude do a code review, to make sure that I'm in the best spot possible to start adding filters, or potentally changing the dataset that we're looking at. 

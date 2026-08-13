@@ -1,0 +1,30 @@
+# Direct dependencies for dwarfhunt, pinned to the versions this repo's
+# notebooks were last run against. See REQUIREMENTS.md for setup steps.
+#
+#     pip install -r requirements.txt
+#
+# Everything else in the environment (astropy, scipy, spectres, pooch,
+# astroquery, tqdm, ...) arrives transitively through species and is
+# deliberately not pinned here.
+
+# Atmospheric model grids, filter curves, and synthetic photometry.
+# This is the heavy one: it owns the species_database.hdf5 in each
+# subproject folder.
+species==0.10.4
+
+# Arrays, tables, plotting.
+numpy==2.2.6
+pandas==3.0.3
+matplotlib==3.11.1
+
+# GaussianMixture, train_test_split, and the confusion-matrix helpers used
+# by michelson-repro/helpers/gmm_classify.py.
+scikit-learn==1.9.0
+
+# Read directly in helpers/generate_planet_list.py and the temp-color
+# notebook to inspect the species database without going through species.
+h5py==3.16.0
+
+# The work lives in notebooks.
+jupyterlab==4.6.1
+ipykernel==7.3.0
