@@ -1,7 +1,7 @@
 """Galaxy template helpers (SWIRE and Kirkpatrick+2015), moved out of
 michelson-galaxy-graph.ipynb.
 
-Mirrors generate_planet_list.py's shape: load a template, redshift it, synthesize
+Mirrors planets.py's shape: load a template, redshift it, synthesize
 per-filter magnitudes, then hand the magnitudes to that module's color_pairs so
 planets and galaxies compute colors the same way.
 
@@ -13,7 +13,7 @@ from itertools import combinations
 import numpy as np
 from species.phot.syn_phot import SyntheticPhotometry
 
-from .generate_planet_list import color_pairs, filter_label
+from .planets import color_pairs, filter_label
 
 DEFAULT_FILTERS = ("JWST/MIRI.F1065C", "JWST/MIRI.F1140C", "JWST/MIRI.F1550C")
 DEFAULT_REDSHIFTS = np.linspace(0.5, 2, 90)
@@ -116,17 +116,19 @@ def get_full_redshift_mag_loop(file, filter_names=DEFAULT_FILTERS, redshifts=DEF
 def galaxy_color_color_data(file, filter_names=DEFAULT_FILTERS, redshifts=DEFAULT_REDSHIFTS):
     """One call: load a SWIRE template and build every flux/color column across `redshifts`.
 
-    The galaxy-side equivalent of generate_planet_list's
+    The galaxy-side equivalent of planets'
     update_planet_flux_and_magnitude + add_color_columns pair, collapsed into one
     function since synth_mags is cheap (no ~818 MB HDF5 reads to batch around, unlike
     the planet side). Colors go through the same color_pairs primitive planets use, so
     the "A - B" keys line up and the result is a drop-in argument to
-    generate_planet_list.color_color_matrix.
+    planets.color_color_matrix.
 
     Parameters
     ----------
     file : str or Path
-        SWIRE template file, e.g. "./galaxy-data/swire-library/N6090_template_norm.sed".
+        SWIRE template file. Resolve it with
+        paths.galaxy_template('swire-library/N6090_template_norm.sed')
+        rather than a cwd-relative literal.
     filter_names : sequence of str
         Full species filter names. Defaults to the three MIRI coronagraph filters.
     redshifts : sequence of float
@@ -252,7 +254,9 @@ def galaxy_color_color_data_k15(file, filter_names=DEFAULT_FILTERS, redshifts=DE
     Parameters
     ----------
     file : str or Path
-        K15 template file, e.g. "./galaxy-data/K15_templates/MIR_library/MIRO0.0.txt".
+        K15 template file. Resolve it with
+        paths.galaxy_template('K15_templates/MIR_library/MIR0.0.txt')
+        rather than a cwd-relative literal.
     filter_names : sequence of str
         Full species filter names. Defaults to the three MIRI coronagraph filters.
     redshifts : sequence of float

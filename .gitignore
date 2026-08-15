@@ -76,3 +76,17 @@ htmlcov/
 *.hdf5
 */data/*
 
+# Shared species download cache at the repo root. Kept alongside */data/*
+# rather than replacing it: */data/* matches only one directory level, so it
+# does not cover a top-level data/. sprint-week's data/ holds tracked tutorial
+# inputs and is unaffected either way -- gitignore rules do not apply to files
+# that are already tracked.
+/data/
+
+# Generated per-checkout: holds absolute, machine-specific paths.
+# See species_config.ini.template.
+/species_config.ini
+
+# Baseline archives from tools/capture_baseline.py -- machine-local, and large.
+baseline*.npz
+

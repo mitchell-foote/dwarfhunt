@@ -25,6 +25,7 @@ assumption lives in color_color_plots.py's plotting helpers instead, since
 that's where it's unavoidable.
 """
 
+import warnings
 from typing import Literal
 
 import numpy as np
@@ -167,12 +168,27 @@ class GMMClassifier:
         X = np.asarray(X)
         y = np.asarray(y)
 
-        self.gm_ = GaussianMixture(
-            n_components=self.n_components,
-            covariance_type=self.covariance_type,
-            random_state=self.random_state,
-            n_init=self.n_init,
-        ).fit(X)
+        # n_init > 1 makes GaussianMixture try several random restarts and
+        # keep the best (highest-likelihood) one. With the fuller MIR-library
+        # galaxy set, some of the *discarded* restarts transiently land on a
+        # near-degenerate component (a handful of points wedged into a tight
+        # cluster) before EM moves on -- that throws "divide by zero" /
+        # "invalid value ... in matmul" RuntimeWarnings from sklearn's
+        # internal linear algebra. Verified those warnings don't touch the
+        # returned model: gm_.covariances_ and precisions_cholesky_ come out
+        # finite and well-conditioned regardless, since the discarded restart
+        # never becomes self.gm_. Scoped suppression, not a global filter, so
+        # a real problem in the *kept* fit still isn't hidden.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=".*encountered in matmul.*",
+                category=RuntimeWarning)
+            self.gm_ = GaussianMixture(
+                n_components=self.n_components,
+                covariance_type=self.covariance_type,
+                random_state=self.random_state,
+                n_init=self.n_init,
+            ).fit(X)
 
         self.classes_ = np.unique(y)
         resp = self.gm_.predict_proba(X)

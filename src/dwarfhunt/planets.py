@@ -16,6 +16,8 @@ from matplotlib.colors import Normalize
 from species.core import constants
 from species.read.read_filter import ReadFilter
 
+from . import paths
+
 # --- deny-list of grid points with no spectrum --------------------------------
 # species stores an all-zero spectrum for any grid point whose model file is
 # absent and that linear interpolation could not recover. That is the
@@ -30,20 +32,35 @@ from species.read.read_filter import ReadFilter
 # and logg=3.0 is on the edge of the axis so griddata could not extrapolate
 # the rest. Nothing at logg >= 3.25 is missing.
 
-# Data files (missing_grid_points.json, species_database.hdf5) live in the
-# notebook directory one level up from this helpers/ package, not wherever
-# the importing notebook's cwd happens to be.
-DATA_DIR = Path(__file__).resolve().parent.parent
-DENY_PATH = DATA_DIR / "missing_grid_points.json"
-DB_PATH = DATA_DIR / "species_database.hdf5"
+# Data locations come from dwarfhunt.paths, which reads the same
+# species_config.ini that species itself reads. The previous
+# `Path(__file__).parent.parent` form silently repointed the moment this module
+# moved, and gave no error when the file it named was absent -- it just rebuilt
+# the cache against nothing.
+#
+# These are functions rather than module constants because the database path is
+# only knowable after dwarfhunt.init() has chosen a config, and importing this
+# module must not depend on that having happened yet.
 
 
-def scan_missing_grid_points(tag, db_path=DB_PATH):
+def default_db_path():
+    """The configured database. Resolved per call, never cached at import."""
+    return paths.database_path()
+
+
+def default_deny_path():
+    """The deny-list cache under the repo cache directory."""
+    return paths.cache_file("missing_grid_points.json")
+
+
+def scan_missing_grid_points(tag, db_path=None):
     """Find every grid cell of `tag` that holds an all-zero spectrum.
 
     Returns (params, axes, mask), where `mask` is a boolean array over the grid
     axes that is True wherever the spectrum is missing.
     """
+    db_path = db_path if db_path is not None else default_db_path()
+
     with h5py.File(db_path, "r") as hdf:
         group = hdf[f"models/{tag}"]
         params = [group.attrs[f"parameter{i}"] for i in range(group.attrs["n_param"])]
@@ -86,8 +103,11 @@ def denied_axis_values(params, axes, mask):
     return dropped
 
 
-def load_deny_list(tags, db_path=DB_PATH, path=DENY_PATH, rebuild=False):
+def load_deny_list(tags, db_path=None, path=None, rebuild=False):
     """Load the cached deny-list, scanning the database the first time."""
+    db_path = db_path if db_path is not None else default_db_path()
+    path = path if path is not None else default_deny_path()
+
     if path.exists() and not rebuild:
         return json.loads(path.read_text())
 
@@ -116,7 +136,29 @@ def load_deny_list(tags, db_path=DB_PATH, path=DENY_PATH, rebuild=False):
 
     return deny
 
-deny = load_deny_list(['sonora-elfowl-t', 'sonora-elfowl-y'])
+
+# The Elf Owl grids are the ones with missing spectra, so they are what the
+# cached deny-list covers by default.
+DEFAULT_DENY_TAGS = ("sonora-elfowl-t", "sonora-elfowl-y")
+
+_DENY_CACHE = {}
+
+
+def deny_list(tags=DEFAULT_DENY_TAGS, rebuild=False):
+    """The deny-list, built on first use and memoised for the session.
+
+    This used to run at module scope. That made a bare `import` of this module
+    open the multi-GB database and write a JSON cache as a side effect -- and it
+    fired transitively, so importing the galaxy module paid for it too. Worse,
+    it ran before any caller could choose a config, so it read whichever
+    database the cwd implied.
+    """
+    key = tuple(tags)
+
+    if rebuild or key not in _DENY_CACHE:
+        _DENY_CACHE[key] = load_deny_list(list(tags), rebuild=rebuild)
+
+    return _DENY_CACHE[key]
 
 
 @contextmanager
@@ -150,10 +192,10 @@ def skip_nearest_spec_check():
         read_model_module.check_nearest_spec = original
 
 
-def generate_planet_arrays(model: ReadModel, radius_range, distance=10, num_samples=200, deny=None):
+def generate_planet_arrays(model: ReadModel, radius_range, distance=10, num_samples=200, deny=None, rng=None):
     model_bounds = model.get_bounds()
     model_points = model.get_points()
-
+    generator = np.random.default_rng(rng) if rng is not None else np.random.default_rng()
     # Strip the values with no spectrum out of the pool before sampling, so
     # every draw is valid by construction. This throws away the handful of real
     # spectra that happen to share a denied value (Elf Owl ships 12 logg=3.00
@@ -177,9 +219,8 @@ def generate_planet_arrays(model: ReadModel, radius_range, distance=10, num_samp
         assert not any(tuple(float(v) for v in combo) in denied_combos for combo in reachable), \
             "deny-list does not cover the whole sampling pool"
 
-    random_values = {key: np.random.choice(vals, size=num_samples) for key, vals in pool.items()}
-    #random_values = {key: np.random.uniform(low=val[0], high=val[1], size=num_samples) for key, val in model_bounds.items()}
-    random_values['radius'] = np.random.uniform(low=radius_range[0], high=radius_range[1], size=num_samples)
+    random_values = {key: generator.choice(vals, size=num_samples) for key, vals in pool.items()}
+    random_values['radius'] = generator.uniform(low=radius_range[0], high=radius_range[1], size=num_samples)
     random_values['distance'] = np.full(num_samples, distance)
     return random_values
 
@@ -206,7 +247,7 @@ def filter_label(filter_name):
     return filter_name.rsplit(".", 1)[-1]
 
 
-def model_wavel_range(tag, db_path=DB_PATH):
+def model_wavel_range(tag, db_path=None):
     """Wavelength coverage (um) actually stored for `tag` in the database.
 
     Reads just the wavelength dataset (a few thousand floats), not the ~818 MB flux
@@ -215,12 +256,14 @@ def model_wavel_range(tag, db_path=DB_PATH):
     it's silently overwritten by the filter's own range whenever filter_name is set
     (see check_filters_fit_model), so it can't be used to detect a mismatch itself.
     """
+    db_path = db_path if db_path is not None else default_db_path()
+
     with h5py.File(db_path, "r") as hdf:
         wl = hdf[f"models/{tag}/wavelength"]
         return float(wl[0]), float(wl[-1])
 
 
-def check_filters_fit_model(tag, filter_names, db_path=DB_PATH):
+def check_filters_fit_model(tag, filter_names, db_path=None):
     """Raise ValueError for any filter whose bandpass falls outside `tag`'s grid.
 
     Elf Owl (0.61-14.9um) can't support JWST/MIRI.F1550C (14.912-16.219um) for exactly
@@ -382,7 +425,47 @@ def check_power_law(predicted_flux: np.ndarray, actual_flux: np.ndarray):
     return residual
 
 
-def get_planet_spectra(tag, planet_arrays, wavel_range=(0.61, 14.9), db_path=DB_PATH):
+def _axis_indices(axis, values, tag, param, rtol=1e-9):
+    """Locate each value on a grid axis, refusing anything not actually on it.
+
+    np.searchsorted alone is not enough. It returns an *insertion point*, not a
+    match, so a value that misses a node returns the index of a neighbouring one
+    and the caller silently gets the wrong grid point's spectrum -- no exception,
+    no warning, just a subtly wrong number. It can also return len(axis) for a
+    value past the top end, which then raises a confusing out-of-bounds error far
+    from the cause.
+
+    This function is only valid because generate_planet_arrays draws every
+    parameter with np.random.choice over the grid's own axis values, so every
+    requested value is expected to sit exactly on a node. If that assumption ever
+    breaks, this raises instead of quietly lying.
+    """
+    axis = np.asarray(axis)
+    values = np.asarray(values)
+
+    idx = np.searchsorted(axis, values)
+    idx = np.clip(idx, 0, len(axis) - 1)
+
+    # searchsorted can land one past the true node for a value equal to it,
+    # depending on side; check the neighbour too before declaring a miss.
+    left = np.clip(idx - 1, 0, len(axis) - 1)
+    use_left = np.abs(axis[left] - values) < np.abs(axis[idx] - values)
+    idx = np.where(use_left, left, idx)
+
+    off_node = ~np.isclose(axis[idx], values, rtol=rtol, atol=0.0)
+    if np.any(off_node):
+        bad = np.unique(values[off_node])[:5]
+        raise ValueError(
+            f"{tag}: {int(off_node.sum())} value(s) for {param!r} are not on the "
+            f"model grid, e.g. {bad.tolist()}. get_planet_spectra indexes the grid "
+            "directly and cannot interpolate; sample with generate_planet_arrays, "
+            "or go through species.ReadModel.get_model instead."
+        )
+
+    return idx
+
+
+def get_planet_spectra(tag, planet_arrays, wavel_range=(0.61, 14.9), db_path=None):
     """Read a batch of planet spectra straight out of the HDF5 grid, no species.
 
     generate_planet_arrays samples every parameter with np.random.choice against
@@ -414,6 +497,8 @@ def get_planet_spectra(tag, planet_arrays, wavel_range=(0.61, 14.9), db_path=DB_
         same constants and formula as ReadModel.get_data so the two are
         bit-identical at a shared grid point.
     """
+    db_path = db_path if db_path is not None else default_db_path()
+
     with h5py.File(db_path, "r") as hdf:
         group = hdf[f"models/{tag}"]
         params = [group.attrs[f"parameter{i}"] for i in range(group.attrs["n_param"])]
@@ -426,13 +511,16 @@ def get_planet_spectra(tag, planet_arrays, wavel_range=(0.61, 14.9), db_path=DB_
 
         n_planets = len(next(iter(planet_arrays.values())))
         # each parameter's grid value -> its index along that axis, per planet
-        axis_idx = [np.searchsorted(axes[param], planet_arrays[param]) for param in params]
+        axis_idx = [_axis_indices(axes[param], planet_arrays[param], tag, param)
+                    for param in params]
 
         flux = np.empty((n_planets, hi - lo))
         for i in range(n_planets):
-            flux[i] = group["flux"][
-                axis_idx[0][i], axis_idx[1][i], axis_idx[2][i], axis_idx[3][i], axis_idx[4][i], lo:hi
-            ]
+            # Build the index tuple from however many parameters this grid has.
+            # Hardcoding five positions only ever worked for Elf Owl: bobcat is
+            # 3-parameter (flux is 4-D) and diamondback is 4-parameter, and both
+            # raised "list index out of range" here.
+            flux[i] = group["flux"][tuple(ax[i] for ax in axis_idx) + (slice(lo, hi),)]
 
     # (radius/distance)**2 scaling -- same formula and constants ReadModel.get_data
     # uses (read_model.py, "Apply (radius/distance)^2 scaling"), so a direct
@@ -520,7 +608,7 @@ def predict_power_law(wl_target, slope, intercept):
     return 10 ** (intercept[:, None] + slope[:, None] * np.log10(wl_target)[None, :])
 
 
-def extrapolation_residuals(tag, planet_arrays, fit_range=(12.0, 14.0), test_range=(14.0, 14.9), db_path=DB_PATH):
+def extrapolation_residuals(tag, planet_arrays, fit_range=(12.0, 14.0), test_range=(14.0, 14.9), db_path=None):
     """Fit a power law on `fit_range` and check it against real flux on `test_range`.
 
     This is the validation step: unlike the 14.9-16.6um region species can't cover
@@ -536,6 +624,8 @@ def extrapolation_residuals(tag, planet_arrays, fit_range=(12.0, 14.0), test_ran
         slope, intercept : ndarray (n_planets,), the fitted power law per planet
         teff : ndarray (n_planets,), for coloring plots by temperature
     """
+    db_path = db_path if db_path is not None else default_db_path()
+
     wl, flux = get_planet_spectra(tag, planet_arrays, wavel_range=(fit_range[0], test_range[1]), db_path=db_path)
 
     slope, intercept = fit_power_law(wl, flux, fit_range)

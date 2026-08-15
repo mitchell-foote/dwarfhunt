@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dwarfhunt"
+version = "0.1.0"
+description = "Brown dwarf / galaxy color-color analysis built on species"
+requires-python = ">=3.11"
+
+# Loose lower bounds here; requirements.txt holds the exact pinned set the
+# notebooks were run against. Install that file for a reproducible environment,
+# not this list.
+dependencies = [
+    "species>=0.10.4",
+    "numpy>=2.2",
+    "pandas>=3.0",
+    "matplotlib>=3.11",
+    "scikit-learn>=1.9",
+    "h5py>=3.16",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "needs_db: requires the shared species_database.hdf5 to be present",
+]
