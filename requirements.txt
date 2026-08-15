@@ -28,3 +28,6 @@ h5py==3.16.0
 # The work lives in notebooks.
 jupyterlab==4.6.1
 ipykernel==7.3.0
+
+# Test suite (tests/), which guards the shared-database config seam.
+pytest==9.1.1

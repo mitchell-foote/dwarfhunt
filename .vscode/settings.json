@@ -1,5 +1,14 @@
 {
     "python.defaultInterpreterPath": "/opt/homebrew/Caskroom/miniconda/base/envs/dwarfhunt/bin/python",
     "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda"
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    // pip -e registers src/ through a .pth file, which Pylance does not follow,
+    // so without this every `import dwarfhunt` shows as unresolved.
+    "python.analysis.extraPaths": [
+        "src"
+    ],
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "tests"
+    ]
 }

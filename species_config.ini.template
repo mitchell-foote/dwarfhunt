@@ -1,0 +1,18 @@
+; Template for the shared species_config.ini at the repo root.
+;
+; You do not normally create this by hand -- dwarfhunt.init() generates the real
+; file on first run. It is here so the expected shape is visible in git, since
+; the generated file is ignored (it holds absolute, machine-specific paths).
+;
+; To render it manually:
+;     python -c "import dwarfhunt; dwarfhunt.ensure_config(overwrite=True)"
+;
+; Both paths MUST be absolute. species applies no path normalisation -- the raw
+; string is handed straight to h5py -- so a relative value resolves against
+; whatever working directory the caller happens to have, which silently points
+; different notebooks at different databases.
+
+[species]
+database = <REPO_ROOT>/data/species_database.hdf5
+data_folder = <REPO_ROOT>/data
+vega_mag = 0.03
