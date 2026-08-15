@@ -150,10 +150,10 @@ def skip_nearest_spec_check():
         read_model_module.check_nearest_spec = original
 
 
-def generate_planet_arrays(model: ReadModel, radius_range, distance=10, num_samples=200, deny=None):
+def generate_planet_arrays(model: ReadModel, radius_range, distance=10, num_samples=200, deny=None, rng=None):
     model_bounds = model.get_bounds()
     model_points = model.get_points()
-
+    generator = np.random.default_rng(rng) if rng is not None else np.random.default_rng()
     # Strip the values with no spectrum out of the pool before sampling, so
     # every draw is valid by construction. This throws away the handful of real
     # spectra that happen to share a denied value (Elf Owl ships 12 logg=3.00
@@ -177,9 +177,8 @@ def generate_planet_arrays(model: ReadModel, radius_range, distance=10, num_samp
         assert not any(tuple(float(v) for v in combo) in denied_combos for combo in reachable), \
             "deny-list does not cover the whole sampling pool"
 
-    random_values = {key: np.random.choice(vals, size=num_samples) for key, vals in pool.items()}
-    #random_values = {key: np.random.uniform(low=val[0], high=val[1], size=num_samples) for key, val in model_bounds.items()}
-    random_values['radius'] = np.random.uniform(low=radius_range[0], high=radius_range[1], size=num_samples)
+    random_values = {key: generator.choice(vals, size=num_samples) for key, vals in pool.items()}
+    random_values['radius'] = generator.uniform(low=radius_range[0], high=radius_range[1], size=num_samples)
     random_values['distance'] = np.full(num_samples, distance)
     return random_values
 
