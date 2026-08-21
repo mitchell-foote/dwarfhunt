@@ -26,10 +26,42 @@ that's where it's unavoidable.
 """
 
 import warnings
+from contextlib import contextmanager
 from typing import Literal
 
 import numpy as np
 from sklearn.mixture import GaussianMixture
+
+
+
+@contextmanager
+def _quiet_blas_matmul():
+    """Silence numpy's spurious matmul RuntimeWarnings from Apple Accelerate.
+
+    On this machine (numpy 2.2 + BLAS "accelerate"), any np.matmul above roughly
+    900 rows emits "divide by zero" / "overflow" / "invalid value encountered in
+    matmul" regardless of its inputs -- a 900x3 array of ones times a 3x3 of
+    ones, result exactly 3.0 everywhere, triggers all three. The Accelerate path
+    leaves stale FPU exception flags that numpy then reports as real errors. The
+    computed values are correct: the same product via np.einsum, which takes a
+    different code path, is warning-free and bit-identical.
+
+    An earlier version of this comment blamed near-degenerate n_init restarts.
+    That was wrong -- the warnings reproduce on three well-separated spherical
+    blobs with a covariance condition number of 1.3, and on inputs containing no
+    unusual values at all. It is a BLAS backend artifact, not a property of the
+    fit or of the data.
+
+    Scoped rather than a global filter, and deliberately narrow: it matches only
+    the matmul message, so genuine numerical trouble (a singular covariance, a
+    nan mean) still surfaces. GMMClassifier.assert_finite() is the positive
+    check that the fitted model is actually sound.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message=".*encountered in matmul.*",
+            category=RuntimeWarning)
+        yield
 
 
 def balanced_accuracy(y_true, y_pred, classes=None):
@@ -168,21 +200,14 @@ class GMMClassifier:
         X = np.asarray(X)
         y = np.asarray(y)
 
-        # n_init > 1 makes GaussianMixture try several random restarts and
-        # keep the best (highest-likelihood) one. With the fuller MIR-library
-        # galaxy set, some of the *discarded* restarts transiently land on a
-        # near-degenerate component (a handful of points wedged into a tight
-        # cluster) before EM moves on -- that throws "divide by zero" /
-        # "invalid value ... in matmul" RuntimeWarnings from sklearn's
-        # internal linear algebra. Verified those warnings don't touch the
-        # returned model: gm_.covariances_ and precisions_cholesky_ come out
-        # finite and well-conditioned regardless, since the discarded restart
-        # never becomes self.gm_. Scoped suppression, not a global filter, so
-        # a real problem in the *kept* fit still isn't hidden.
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message=".*encountered in matmul.*",
-                category=RuntimeWarning)
+        # n_init > 1 makes GaussianMixture try several random restarts and keep
+        # the best (highest-likelihood) one. See Log.md 2026-08-05: that, not
+        # n_components, is what stabilizes the fit across seeds.
+        #
+        # _quiet_blas_matmul suppresses a spurious warning from the BLAS
+        # backend, not a real numerical problem -- see its docstring. The
+        # finiteness check below is what actually guards the returned model.
+        with _quiet_blas_matmul():
             self.gm_ = GaussianMixture(
                 n_components=self.n_components,
                 covariance_type=self.covariance_type,
@@ -190,14 +215,36 @@ class GMMClassifier:
                 n_init=self.n_init,
             ).fit(X)
 
+        self.assert_finite()
+
         self.classes_ = np.unique(y)
-        resp = self.gm_.predict_proba(X)
+        with _quiet_blas_matmul():
+            resp = self.gm_.predict_proba(X)
         self.comp_to_class_, self.mass_, self.degenerate_ = component_class_map(
             resp, y, self.classes_)
         return self
 
+    def assert_finite(self):
+        """Raise if the fitted mixture contains a non-finite parameter.
+
+        The positive counterpart to _quiet_blas_matmul: since the matmul
+        warnings are suppressed as backend noise, something has to affirm that
+        the model is genuinely sound rather than merely quiet. Checks the three
+        arrays a degenerate fit would corrupt -- a singular covariance shows up
+        as an inf in precisions_cholesky_.
+        """
+        for name in ("means_", "covariances_", "precisions_cholesky_"):
+            arr = np.asarray(getattr(self.gm_, name))
+            if not np.isfinite(arr).all():
+                n_bad = int((~np.isfinite(arr)).sum())
+                raise ValueError(
+                    f"fitted mixture has {n_bad} non-finite value(s) in {name}; "
+                    "this is a real degenerate fit, not the BLAS matmul warning")
+        return self
+
     def predict(self, X):
-        return self.comp_to_class_[self.gm_.predict(np.asarray(X))]
+        with _quiet_blas_matmul():
+            return self.comp_to_class_[self.gm_.predict(np.asarray(X))]
 
     def predict_proba(self, X):
         """Per-class probabilities, summing to 1 across class for each row of X. 
@@ -208,7 +255,8 @@ class GMMClassifier:
         for anything that wants a soft score -- an ROC curve, a purity cut
         on the "which dwarfs fail" cell, etc.
         """
-        resp = self.gm_.predict_proba(np.asarray(X))
+        with _quiet_blas_matmul():
+            resp = self.gm_.predict_proba(np.asarray(X))
         proba = np.zeros((resp.shape[0], len(self.classes_)))
         for j in range(len(self.classes_)):
             cols = np.where(self.comp_to_class_ == self.classes_[j])[0]
@@ -220,10 +268,12 @@ class GMMClassifier:
         return balanced_accuracy(y, self.predict(X), classes=self.classes_)
 
     def bic(self, X):
-        return self.gm_.bic(np.asarray(X))
+        with _quiet_blas_matmul():
+            return self.gm_.bic(np.asarray(X))
 
     def aic(self, X):
-        return self.gm_.aic(np.asarray(X))
+        with _quiet_blas_matmul():
+            return self.gm_.aic(np.asarray(X))
 
     def component_table(self, X_train=None, y_train=None):
         """One row per component: assigned class, class-balanced mass, raw
@@ -238,7 +288,8 @@ class GMMClassifier:
 
         raw_counts = None
         if X_train is not None and y_train is not None:
-            hard = self.gm_.predict(np.asarray(X_train))
+            with _quiet_blas_matmul():
+                hard = self.gm_.predict(np.asarray(X_train))
             y_train = np.asarray(y_train)
             raw_counts = np.zeros((self.n_components, len(self.classes_)), dtype=int)
             for k in range(self.n_components):

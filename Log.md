@@ -288,3 +288,28 @@ Now that we have the graphs and did some rerunning. Looks like K is best at 5, n
 ## 2026-08-12
 
 Because we're now moving over to a new phase of work, I'm going to refactor the repo so that we have the helper functions + db available for all notebooks moving forward. I'll also have claude do a code review, to make sure that I'm in the best spot possible to start adding filters, or potentally changing the dataset that we're looking at. 
+
+## 2026-08-19 - 2026-08-20
+
+Vacation was wonderful, but now I'm back to work on finding a filter to seperate the population. We're going to data that we already have, and focus on adding the WISE filters, as they seem to have coverage in the molecule bands that we need to use to seperate the populations. 
+
+Alright, boilerplate is ready, we're going to start with WISE/WISE.W3. 
+
+So I'm going to check the BIC, to make sure that we're in the right ballpark. 
+
+Ok, odd result, we got 7 this time. Interesting that it changed. I'll rerun with a different seed to see if anything changes. 
+
+Seed 1 is actually 8. Let me try a couple more seeds. 
+
+Seed 3 is 6. I guess it doesn't matter which one we do, so long as we stick to the same seed. I'm going to go back to my original seed (2), and do 7. We'll see what that does. 
+
+So because the K values are dipping from 6-8, I'm going to recalculate all of the K values for my seed runs to get a good balanced accuracy of the model itself. 
+
+Ok, we've updated the function, and added the ability to determine the correct K values for the different areas. 
+
+**Results**
+With the added color under 20 different seeds, we get the following information. 
+
+With the W3 color added, we get a balanced accuracy: 0.9809 +- 0.0070 vs the two color(three filter) variant which was 0.9574 +- 0.0142. 
+
+On the splits, we saw a 19/20 improvement, with a headroom improvement percentage of 51.1% +- 4.8% (per split, n=20), which is a great improvement. Again, this is testing modeled data, but progress is progress. In our deep dive test data, we've got 2/68 galaxy points failing still, with those failures coming from (oddly enough), the AGN 0.0 and 0.5 in the _low_ redshifted areas. 

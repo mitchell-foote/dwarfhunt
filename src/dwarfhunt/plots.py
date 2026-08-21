@@ -13,8 +13,11 @@ Styled to match the Michelson figure:
 - tracks are labelled directly rather than through a shape legend
 """
 
+from itertools import combinations
+
 import numpy as np
 from matplotlib import colormaps
+from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 from matplotlib.lines import Line2D
@@ -171,31 +174,82 @@ def add_figure_scales(fig, axes, dwarf_handle, galaxy_handle,
     return cax_galaxy, cax_dwarf
 
 
-def _covariances_2d(gm):
-    """Normalize any GaussianMixture covariance_type to (n_components, 2, 2).
+def _covariances_full(gm):
+    """Normalize any GaussianMixture covariance_type to (n_components, d, d).
 
     sklearn stores covariances in four different shapes depending on
-    covariance_type ("full": (K,2,2), "tied": (2,2), "diag": (K,2), "spherical":
-    (K,)); the ellipse math below needs a full 2x2 per component regardless of
-    which one was used to fit, otherwise it only happens to work for "full".
+    covariance_type ("full": (K,d,d), "tied": (d,d), "diag": (K,d), "spherical":
+    (K,)); the ellipse and marginalization math below needs a dense d x d per
+    component regardless of which one was used to fit, otherwise it only happens
+    to work for "full".
     """
-    cov = gm.covariances_
+    cov = np.asarray(gm.covariances_)
     k = gm.n_components
+    d = np.asarray(gm.means_).shape[1]
+    diag = np.arange(d)
+
     if gm.covariance_type == "full":
         return cov
     if gm.covariance_type == "tied":
-        return np.broadcast_to(cov, (k, *cov.shape)).copy()
+        return np.broadcast_to(cov, (k, d, d)).copy()
     if gm.covariance_type == "diag":
-        out = np.zeros((k, 2, 2))
-        out[:, 0, 0] = cov[:, 0]
-        out[:, 1, 1] = cov[:, 1]
+        out = np.zeros((k, d, d))
+        out[:, diag, diag] = cov
         return out
     if gm.covariance_type == "spherical":
-        out = np.zeros((k, 2, 2))
-        out[:, 0, 0] = cov
-        out[:, 1, 1] = cov
+        out = np.zeros((k, d, d))
+        out[:, diag, diag] = cov[:, None]
         return out
     raise ValueError(f"unrecognized covariance_type: {gm.covariance_type!r}")
+
+
+def marginal_mixture(gm, dims):
+    """The fitted mixture restricted to `dims`, as (weights, means, covariances).
+
+    Marginalizing a Gaussian mixture onto a subset of its coordinates is exact,
+    not an approximation: integrating the other coordinates out leaves a mixture
+    with the *same* weights, the sub-vector of each mean, and the corresponding
+    sub-block of each covariance. That is what makes a 2-color panel of a
+    d-color fit an honest picture rather than a cartoon -- it is precisely the
+    model the classifier would have if it had only ever seen those two colors.
+
+    What it is *not* is a slice through the d-dimensional decision boundary; see
+    plot_decision_regions's `mode` for that distinction.
+    """
+    dims = list(dims)
+    weights = np.asarray(gm.weights_)
+    means = np.asarray(gm.means_)[:, dims]
+    covariances = _covariances_full(gm)[:, dims][:, :, dims]
+    return weights, means, covariances
+
+
+def _weighted_log_prob(points, weights, means, covariances):
+    """log(w_k * N(x; mu_k, Sigma_k)), shape (n_points, n_components).
+
+    The same quantity sklearn's GaussianMixture argmaxes in predict(), rebuilt
+    here because the marginal mixture from marginal_mixture() is a bare
+    (weights, means, covariances) triple with no fitted estimator to ask.
+    """
+    points = np.asarray(points, dtype=float)
+    n, d = points.shape
+    out = np.empty((n, len(weights)))
+
+    with np.errstate(divide="ignore"):
+        log_weights = np.log(weights)
+
+    for k in range(len(weights)):
+        cov = covariances[k]
+        sign, logdet = np.linalg.slogdet(cov)
+        if sign <= 0:
+            # A component can go singular in a marginal projection even when the
+            # d-dimensional fit is healthy. Nudge the diagonal rather than
+            # emitting a nan that would silently blank part of the panel.
+            cov = cov + np.eye(d) * 1e-12
+            sign, logdet = np.linalg.slogdet(cov)
+        delta = points - means[k]
+        maha = np.einsum("ij,jk,ik->i", delta, np.linalg.inv(cov), delta)
+        out[:, k] = log_weights[k] - 0.5 * (maha + logdet + d * np.log(2 * np.pi))
+    return out
 
 
 def class_color_map(classes):
@@ -213,7 +267,7 @@ def class_color_map(classes):
 
 
 def plot_component_ellipses(ax, gm, comp_to_class=None, class_colors=None,
-                            n_std=2, linewidth=1.4):
+                            n_std=2, linewidth=1.4, dims=(0, 1)):
     """Draw each GMM component as a covariance ellipse.
 
     Built for the K-components-per-curve GMMClassifier in gmm_classify.py --
@@ -224,7 +278,7 @@ def plot_component_ellipses(ax, gm, comp_to_class=None, class_colors=None,
     Parameters
     ----------
     ax : matplotlib Axes
-    gm : sklearn.mixture.GaussianMixture (already fit, 2 features)
+    gm : sklearn.mixture.GaussianMixture (already fit, any number of features)
     comp_to_class : ndarray, shape (n_components,), optional
         Component -> class assignment from gmm_classify.component_class_map
         or GMMClassifier.comp_to_class_. Colors ellipses by class instead of
@@ -235,14 +289,18 @@ def plot_component_ellipses(ax, gm, comp_to_class=None, class_colors=None,
     n_std : float
         Ellipse radius in standard deviations (2 ~ 95% contour for a 2-D
         Gaussian).
+    dims : (int, int)
+        Which two feature columns this panel is drawing. For a fit with more
+        than 2 features the ellipse is the exact marginal of the component onto
+        those two columns (see marginal_mixture), i.e. the shadow the ellipsoid
+        casts on this plane -- so it is drawn at full extent, not narrowed the
+        way a slice through the ellipsoid would be.
 
     Returns
     -------
     list of Ellipse patches added to ax, one per component.
     """
-    covariances = _covariances_2d(gm)
-    means = gm.means_
-    weights = gm.weights_
+    weights, means, covariances = marginal_mixture(gm, dims)
     max_weight = weights.max() if len(weights) else 1.0
 
     if comp_to_class is not None and class_colors is None:
@@ -268,18 +326,45 @@ def plot_component_ellipses(ax, gm, comp_to_class=None, class_colors=None,
 
 
 def plot_decision_regions(ax, clf, X, y, resolution=300, class_colors=None,
-                          point_alpha=0.7):
-    """Shade the color-color plane by predicted class and scatter the real
+                          point_alpha=0.7, dims=(0, 1), mode="marginal",
+                          slice_at=None):
+    """Shade a color-color plane by predicted class and scatter the real
     points on top.
 
-    clf needs a .predict(X) -> class array method (GMMClassifier from
-    gmm_classify.py fits this directly). Only meaningful in 2 features, since
-    it shades the axes' own plane.
+    clf needs a .predict(X) -> class array method (GMMClassifier from gmm.py
+    fits this directly). `X` is always the *full* feature matrix; `dims` picks
+    the two columns this panel draws.
 
     Builds the meshgrid from the *current* axis limits via get_xlim/get_ylim
     rather than assuming ascending order, so this still works after
     style_panel has inverted the y axis for the magnitude convention.
 
+    Parameters
+    ----------
+    dims : (int, int)
+        Feature columns for the x and y axis.
+    mode : {"marginal", "slice"}
+        Only consulted when X has more than 2 columns, because with exactly 2
+        the panel *is* the feature space and the regions are the classifier's
+        real ones. Beyond that, a plane cannot show a d-dimensional boundary
+        and you have to say which 2-D question you are asking:
+
+        - "marginal" (default): integrate the other colors out under the
+          fitted mixture, then decide. Answers "what would this classifier do
+          knowing only these two colors?". Uses every training point, so the
+          shading is stable, but it is a projection -- two regions that look
+          overlapping here may be cleanly separated by a color not on display.
+        - "slice": hold the other colors fixed at `slice_at` and evaluate the
+          real d-dimensional classifier there. Answers "where is the true
+          boundary on this particular cut?". Genuinely a cross-section of the
+          boundary, but it only describes that one cut, and most plotted points
+          do not lie on it.
+
+        Neither is the whole boundary. That is a property of d > 2, not a
+        shortcoming of either choice.
+    slice_at : array-like, shape (n_features,), optional
+        Where to hold the off-panel columns for mode="slice". Defaults to the
+        per-column median of X, i.e. the middle of the observed data.
     class_colors : dict, class -> color, optional
         Defaults to class_color_map(classes). Pass the same dict used for
         plot_component_ellipses's comp_to_class coloring to keep background,
@@ -291,28 +376,191 @@ def plot_decision_regions(ax, clf, X, y, resolution=300, class_colors=None,
     """
     X = np.asarray(X)
     y = np.asarray(y)
-    if X.shape[1] != 2:
-        raise ValueError(f"plot_decision_regions needs 2 feature columns, got {X.shape[1]}")
+    x_dim, y_dim = dims
+    n_features = X.shape[1]
 
     classes = np.unique(y)
     if class_colors is None:
         class_colors = class_color_map(classes)
 
+    # Scatter first, then read the limits. This function used to build the
+    # meshgrid before anything had been drawn, so on a fresh axes get_xlim()
+    # returned matplotlib's default (0, 1) and the shading came out as a
+    # rectangle from 0 to 1 that ignored where the data actually sat. Plotting
+    # the points first lets autoscale establish real limits; contourf goes
+    # underneath afterward via zorder=0, so the draw order is unchanged.
+    for c in classes:
+        mask = y == c
+        ax.scatter(X[mask, x_dim], X[mask, y_dim], color=class_colors[c], s=16,
+                  alpha=point_alpha, edgecolors="0.25", linewidths=0.3,
+                  zorder=3, label=str(c))
+
     x_lo, x_hi = sorted(ax.get_xlim())
     y_lo, y_hi = sorted(ax.get_ylim())
-    xx, yy = np.meshgrid(np.linspace(x_lo, x_hi, resolution),
-                         np.linspace(y_lo, y_hi, resolution))
-    grid_pred = clf.predict(np.column_stack((xx.ravel(), yy.ravel())))
+    # Pad beyond the current view so the shading still reaches the corners after
+    # style_panel applies its margins, rather than leaving an unshaded border.
+    pad_x = 0.12 * (x_hi - x_lo)
+    pad_y = 0.12 * (y_hi - y_lo)
+    xx, yy = np.meshgrid(np.linspace(x_lo - pad_x, x_hi + pad_x, resolution),
+                         np.linspace(y_lo - pad_y, y_hi + pad_y, resolution))
+    grid = np.column_stack((xx.ravel(), yy.ravel()))
+
+    if n_features == 2:
+        # The panel is the whole feature space: ask the classifier directly.
+        grid_pred = clf.predict(grid)
+    elif mode == "slice":
+        if slice_at is None:
+            slice_at = np.median(X, axis=0)
+        full = np.tile(np.asarray(slice_at, dtype=float), (len(grid), 1))
+        full[:, [x_dim, y_dim]] = grid
+        grid_pred = clf.predict(full)
+    elif mode == "marginal":
+        if not hasattr(clf, "gm_"):
+            raise ValueError(
+                'mode="marginal" needs a GMMClassifier (it marginalizes clf.gm_); '
+                'pass mode="slice" for a classifier that only exposes .predict')
+        # Hard argmax over components, then map to class -- deliberately the
+        # same rule GMMClassifier.predict uses, so the shading agrees with the
+        # confusion matrix rather than quietly using a softer criterion.
+        weights, means, covariances = marginal_mixture(clf.gm_, dims)
+        log_prob = _weighted_log_prob(grid, weights, means, covariances)
+        grid_pred = clf.comp_to_class_[log_prob.argmax(axis=1)]
+    else:
+        raise ValueError(f'mode must be "marginal" or "slice", got {mode!r}')
 
     class_index = {c: i for i, c in enumerate(classes)}
     zz = np.vectorize(class_index.get)(grid_pred).reshape(xx.shape)
 
     region_cmap = ListedColormap([class_colors[c] for c in classes])
+    keep_x, keep_y = ax.get_xlim(), ax.get_ylim()
     ax.contourf(xx, yy, zz, levels=np.arange(len(classes) + 1) - 0.5,
                cmap=region_cmap, alpha=0.25, zorder=0)
-    for c in classes:
-        mask = y == c
-        ax.scatter(X[mask, 0], X[mask, 1], color=class_colors[c], s=16,
-                  alpha=point_alpha, edgecolors="0.25", linewidths=0.3,
-                  zorder=3, label=str(c))
+    ax.set_xlim(keep_x)
+    ax.set_ylim(keep_y)
     return ax
+
+
+def plot_failures(ax, X, y_true, y_pred, cls, dims=(0, 1), c=None,
+                  cmap=None, norm=None, marker="o", size=28,
+                  highlight_color="red", subset=None):
+    """Scatter one class's points on a 2-color projection, ringing the misses.
+
+    The generic form of the "which dwarfs fail" / "which galaxies fail" panels:
+    those differed only in which class they focused on and what they colored the
+    points by (T_eff for dwarfs, redshift for galaxies), so both are this call
+    with different `cls` and `c`.
+
+    Parameters
+    ----------
+    X : ndarray, shape (n_samples, n_features)
+        Full feature matrix; `dims` picks the two columns drawn.
+    y_true, y_pred : ndarray, shape (n_samples,)
+    cls : the class value to draw. Rows of another class are ignored entirely.
+    c : ndarray, shape (n_samples,), optional
+        Per-point value for the color scale, in the *same row order as X* --
+        it is masked to `cls` here, so pass the full-length array, not a
+        pre-filtered one.
+    subset : ndarray of bool, shape (n_samples,), optional
+        Further restrict which rows are drawn, on top of the class mask. Lets
+        one class be split across several calls that differ only in marker --
+        e.g. one per K15 AGN-fraction template -- while redshift keeps the
+        color channel to itself. The returned counts describe the drawn subset,
+        not the whole class.
+
+    Returns
+    -------
+    (handle, n_wrong, n_total) -- handle is what a colorbar needs.
+    """
+    X = np.asarray(X)
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    x_dim, y_dim = dims
+
+    sel = y_true == cls
+    if subset is not None:
+        sel = sel & np.asarray(subset)
+    x = X[sel, x_dim]
+    y_vals = X[sel, y_dim]
+    wrong = y_pred[sel] != cls
+
+    scatter_kw = dict(marker=marker, s=size, edgecolors="0.25",
+                      linewidths=0.4, zorder=3)
+    if c is None:
+        handle = ax.scatter(x, y_vals, **scatter_kw)
+    else:
+        handle = ax.scatter(x, y_vals, c=np.asarray(c)[sel], cmap=cmap,
+                            norm=norm, **scatter_kw)
+
+    ax.scatter(x[wrong], y_vals[wrong], facecolors="none",
+               edgecolors=highlight_color, marker=marker, s=size * 3.4,
+               linewidths=1.4, zorder=4)
+    return handle, int(wrong.sum()), int(sel.sum())
+
+
+def feature_pairs(n_features):
+    """Every (i, j) column pair, i < j -- one panel per pair."""
+    return list(combinations(range(n_features), 2))
+
+
+def plot_decision_grid(clf, X, y, names, pairs=None, mode="marginal",
+                       slice_at=None, class_colors=None, class_labels=None,
+                       ncols=3, panel_size=4.4, resolution=200,
+                       ellipses=True, suptitle=None):
+    """One decision-region panel per pair of color axes.
+
+    The replacement for a single hardcoded (names[0], names[1]) figure. With d
+    colors there are C(d, 2) planes to look at and no principled reason to
+    privilege one, so draw them all: 2 colors gives 1 panel (identical to the
+    old figure), 3 gives 3, 4 gives 6.
+
+    Every panel shares one `class_colors` mapping so a color means the same
+    class throughout, and every panel is titled with its own axis pair -- with
+    six lookalike panels, an unlabeled one is worse than no panel.
+
+    Returns
+    -------
+    (fig, axes, pairs) -- axes[i] draws pairs[i], so a caller can add per-panel
+    annotation afterward without recomputing the pairing.
+    """
+    X = np.asarray(X)
+    y = np.asarray(y)
+    if pairs is None:
+        pairs = feature_pairs(X.shape[1])
+
+    if class_colors is None:
+        class_colors = class_color_map(np.unique(y))
+
+    ncols = min(ncols, len(pairs))
+    nrows = int(np.ceil(len(pairs) / ncols))
+    # layout="constrained" rather than a later tight_layout(): the panels carry
+    # long y labels ("F1140C - F1550C") and constrained layout measures them
+    # before placing axes, instead of fitting them into a fixed grid afterward.
+    # tight_layout also cannot account for a colorbar spanning several axes.
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(panel_size * ncols, panel_size * nrows),
+                             squeeze=False, layout="constrained")
+    axes = axes.ravel()
+
+    for ax, (x_dim, y_dim) in zip(axes, pairs):
+        plot_decision_regions(ax, clf, X, y, dims=(x_dim, y_dim), mode=mode,
+                              slice_at=slice_at, class_colors=class_colors,
+                              resolution=resolution)
+        if ellipses and hasattr(clf, "gm_"):
+            plot_component_ellipses(ax, clf.gm_, comp_to_class=clf.comp_to_class_,
+                                    class_colors=class_colors,
+                                    dims=(x_dim, y_dim))
+        style_panel(ax, names[x_dim], names[y_dim])
+
+    for ax in axes[len(pairs):]:
+        ax.set_visible(False)
+
+    if class_labels:
+        handles = [Line2D([], [], marker="o", linestyle="none",
+                          markerfacecolor=class_colors[c], markeredgecolor="0.25",
+                          markersize=7, label=class_labels.get(c, str(c)))
+                   for c in sorted(class_colors)]
+        axes[0].legend(handles=handles, title="true class", fontsize=8.5)
+
+    if suptitle:
+        fig.suptitle(suptitle)
+    return fig, axes[:len(pairs)], pairs
