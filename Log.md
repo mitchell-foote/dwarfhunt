@@ -316,4 +316,72 @@ On the splits, we saw a 19/20 improvement, with a headroom improvement percentag
 
 ## 2026-08-20-cont. 
 
-I am going have claude split up the files so that we can add more colors to the pop-seperation notebook. We're going to do two things. First, we're going to sort the filters by wavelength so that we get even graphs. Beyond that we're going to add some caching. 
+I am going have claude split up the files so that we can add more colors to the pop-seperation notebook. We're going to sort the filters by wavelength so that we get even graphs. Beyond that we're going to try a whole bunch of new filters to see if we can get even more separation. 
+
+First try: 2MASS/2MASS.Ks. 
+
+Result: We got an error when attempting to build the matrix. Reason: The redshifted galaxy templates don't have coverage in those areas. Let's add a check to verify that we're using filters that cover that range. 
+
+Second try: WISE/WISE.W2
+
+Result: Another error when attempting to build the matrix for the same reason. Based on the math, I need to start looking for filters between 6.000-1501.3 um. 
+
+Note: With that information, I think we're running into a bit of a bind. We do have more MIRI filters, but I don't know if they would be used to detect the brown dwarfs. I'll dig a bit deeper to determine if we have any good options. We need to prove that it's possible, but I don't know if in practice we'll get where we need to go. 
+
+Ok, I got the search back, and we have a couple options. 
+We have 11 filters that meet our currently criteria. 
+
+| filter      |  range (µm)   | margin |         note      | 
+|--|--|--|--|
+JWST/MIRI.F770W  | 6.48 – 8.84   | 0.48   | new blue coverage 
+JWST/MIRI.F1000W | 8.77 – 11.11  | 2.76   |                   
+JWST/MIRI.F1130W | 10.64 – 11.99 | 4.64   | ≈ F1140C          
+JWST/MIRI.F1280W | 11.27 – 14.34 | 4.66   | fills the 12–14 gap
+JWST/MIRI.F1500W | 13.14 – 17.16 | 1.84   | ≈ F1550C, wider      
+JWST/MIRI.F1065C | 10.02 – 11.16 | 4.02   | in use              
+JWST/MIRI.F1140C | 10.74 – 11.96 | 4.74   | in use              
+JWST/MIRI.F1550C | 14.94 – 16.16 | 2.84   | in use              
+WISE/WISE.W3     | 7.44 – 17.26  | 1.44   | in use               
+Spitzer/IRAC.I4  | 6.30 – 9.59   | 0.30   |                      
+AKARI/IRC.S11    | 8.27 – 15.30  | 2.27   |                     
+
+In addition, we have the following filters which almost cover everything. 
+
+F1800W misses by 1.3 µm and F2100W by 5.5 µm on the red side
+
+F560W and IRAC.I3 miss on the blue by ~1.1 µm
+
+We also control two dials here. First is the z_max, which controls how far forward those galaxies are redshifted. However, if we shift it down, it would open up a lot of blue. Also, because we're not seeing a ton of breakdown from the higher redshift values, this may be a good action to take, and get the F560W. 
+
+The second one is the sonora bobcat limit. I've limited it to save on download, but the actual endpoint is 49.0. That's a beefy download. 
+
+Taking a look at what we would gain, we have the following:
+
+| red limit  |              newly usable         |
+|------------|-----------------------------------|
+| 19.0 (now) | —                                 |
+| 21.0       | F1800W                            |
+| 25.0       | L15, F2100W                       | 
+
+
+**Decision:** I'm going to try to add the filters we already have the range for first, then add some of the blue, and then, if we still don't have separation, add more red. 
+
+So in order, we'll add the following filters. 
+
+1. JWST/MIRI.F1280W
+2. JWST/MIRI.F1000W
+3. JWST/MIRI.F770W (depending on how species interprets the range)
+4. JWST/MIRI.F1800W
+
+I'll add a results table below. 
+
+> I'm also realizing that we'll need to increase our K potential values as we increase dimentions. We'll bump it to 15.
+
+> And now I'm thinking we're overfitting, as the two color data is wildly shifting Ks now. Let's limit it to 10 again, and move forward.
+
+Ok! Here's some results
+1. Adding F1280W boosted BA to 0.9872 +- 0.0059, which is +62.8% +- 3.2% (per split, n=20)
+
+
+
+

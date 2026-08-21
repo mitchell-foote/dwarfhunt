@@ -9,9 +9,11 @@ Data only -- the drawing lives in color_color_plots.py.
 """
 
 from itertools import combinations
+from pathlib import Path
 
 import numpy as np
 from species.phot.syn_phot import SyntheticPhotometry
+from species.read.read_filter import ReadFilter
 
 from .planets import color_pairs, filter_label
 
@@ -226,6 +228,71 @@ def synth_mags_k15(wavelength, flux, filter_names):
         mag_list.append(filters_data[0])
     return mag_list
 
+
+def check_filters_fit_k15_templates(file, filter_names=DEFAULT_FILTERS,
+                                    redshifts=DEFAULT_REDSHIFTS):
+    """Raise ValueError for any filter the redshifted template cannot cover.
+
+    The galaxy-side counterpart to planets.check_filters_fit_model. Without it a
+    coverage mismatch is silent at the point of failure and only surfaces much
+    later as something unrecognizable -- adding 2MASS/2MASS.Ks produced
+    "LinAlgError: SVD did not converge" from np.linalg.matrix_rank, a hundred
+    lines downstream, because the NaN magnitudes rode along in X until something
+    finally tried to factor it.
+
+    redshift_k15_data multiplies wavelengths by (1 + z), so a template spanning
+    [rest_lo, rest_hi] is observed over [rest_lo*(1+z), rest_hi*(1+z)]. Both
+    edges move redward with z, so across a redshift grid the tightest blue edge
+    is at max(z) and the tightest red edge is at min(z). A filter has to sit
+    inside that intersection for every z in the grid, not just some of them.
+
+    Two distinct failures are caught here, and the second is the reason the
+    check is strict rather than a warning:
+
+    - No overlap: synth_mags has nothing to integrate and returns NaN. Loud,
+      once you find it.
+    - Partial overlap: synth_mags integrates a truncated bandpass and returns a
+      plausible-looking magnitude that is systematically too faint. Nothing is
+      NaN, nothing raises, and every downstream color is quietly wrong. This is
+      the failure worth failing fast on.
+
+    The K15 libraries all start at 2.0 um rest-frame, which is why nothing
+    blueward of roughly 3 um observed can be used with them at z >= 0.5.
+    """
+    wavelengths, _fluxes, _errors = load_k15_data(file)
+    rest_lo, rest_hi = float(np.min(wavelengths)), float(np.max(wavelengths))
+
+    z = np.asarray(redshifts, dtype=float)
+    z_lo, z_hi = float(z.min()), float(z.max())
+    obs_lo = rest_lo * (1.0 + z_hi)
+    obs_hi = rest_hi * (1.0 + z_lo)
+
+    name_for_message = Path(file).name
+
+    for name in filter_names:
+        filt_lo, filt_hi = (float(v) for v in ReadFilter(name).wavelength_range())
+        if filt_lo >= obs_lo and filt_hi <= obs_hi:
+            continue
+
+        if filt_hi <= obs_lo or filt_lo >= obs_hi:
+            detail = ("No overlap at all, so synth_mags returns NaN for every "
+                      "redshift.")
+        else:
+            detail = ("Only partial overlap, so synth_mags would integrate a "
+                      "truncated bandpass and return a plausible but "
+                      "systematically too-faint magnitude -- wrong numbers "
+                      "with no error raised.")
+
+        raise ValueError(
+            f"{name} ({filt_lo:.3f}-{filt_hi:.3f} um) is not covered by "
+            f"{name_for_message} over z={z_lo:g}-{z_hi:g}: the template spans "
+            f"{rest_lo:.3f}-{rest_hi:.1f} um rest-frame, which is observed as "
+            f"{obs_lo:.3f}-{obs_hi:.1f} um across that redshift range. {detail} "
+            "Drop this filter, or use a template library with wider rest-frame "
+            "coverage."
+        )
+
+
 def get_full_redshift_mag_loop_k15(file, filter_names=DEFAULT_FILTERS, redshifts=DEFAULT_REDSHIFTS):
     """
     Load K15 `file`, redshift it across the redshift values, then translate to values species needs, and synthesize per-filter magnitudes.
@@ -233,6 +300,8 @@ def get_full_redshift_mag_loop_k15(file, filter_names=DEFAULT_FILTERS, redshifts
     Returns a list of (z, mag_array, color_color_data) tuples, one per redshift --
     the shape plot_color_color expects.
     """
+    check_filters_fit_k15_templates(file, filter_names, redshifts)
+
     wavelengths, fluxes, errors = load_k15_data(file)
     # Redshift the data
     full_mag_data = []
@@ -270,6 +339,8 @@ def galaxy_color_color_data_k15(file, filter_names=DEFAULT_FILTERS, redshifts=DE
         "mag_{label}" : ndarray, shape (n_z,), one per filter, e.g. "mag_F1065C"
         "{label_i} - {label_j}" : ndarray, shape (n_z,), one per filter pair
     """
+    check_filters_fit_k15_templates(file, filter_names, redshifts)
+
     wavelengths, fluxes, errors = load_k15_data(file)
     labels = [filter_label(name) for name in filter_names]
 
