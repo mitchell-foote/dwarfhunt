@@ -310,6 +310,10 @@ Ok, we've updated the function, and added the ability to determine the correct K
 **Results**
 With the added color under 20 different seeds, we get the following information. 
 
-With the W3 color added, we get a balanced accuracy: 0.9809 +- 0.0070 vs the two color(three filter) variant which was 0.9574 +- 0.0142. 
+With the W3 color added, we get a balanced accuracy: 0.9817 +- 0.0070 vs the two color(three filter) variant which was 0.9574 +- 0.0142. 
 
 On the splits, we saw a 19/20 improvement, with a headroom improvement percentage of 51.1% +- 4.8% (per split, n=20), which is a great improvement. Again, this is testing modeled data, but progress is progress. In our deep dive test data, we've got 2/68 galaxy points failing still, with those failures coming from (oddly enough), the AGN 0.0 and 0.5 in the _low_ redshifted areas. 
+
+## 2026-08-20-cont. 
+
+I am going have claude split up the files so that we can add more colors to the pop-seperation notebook. We're going to do two things. First, we're going to sort the filters by wavelength so that we get even graphs. Beyond that we're going to add some caching. 

@@ -247,6 +247,39 @@ def filter_label(filter_name):
     return filter_name.rsplit(".", 1)[-1]
 
 
+def filter_mean_wavelength(filter_name):
+    """Mean wavelength (um) of a filter's bandpass, from its transmission curve.
+
+    The sort key for put_filters_in_wavelength_order. Read from species rather
+    than parsed out of the filter name: the name is only a rough guide and is
+    actively misleading for broad bands. "WISE/WISE.W3" is nominally the 12 um
+    band and sorts after "F1140C" alphabetically *and* numerically, but its
+    bandpass spans 7.2 - 18.4 um with a mean of 12.8 um, which places it between
+    F1140C (11.3) and F1550C (15.5) -- not at the red end where the raw name
+    suggests.
+    """
+    return float(ReadFilter(filter_name).mean_wavelength())
+
+
+def put_filters_in_wavelength_order(filter_names):
+    """Sort filters blue to red by mean wavelength.
+
+    color_pairs documents its convention as "bluer minus redder, short
+    wavelength first", but it can only honour that if the labels it is handed
+    are already in wavelength order -- it pairs by position, not by physics. Run
+    the filter list through here before deriving labels and colors and the
+    convention holds automatically, whatever order the filters were typed in.
+
+    This matters more as filters are added: with an unsorted list, two different
+    filter subsets can produce adjacent-colour bases ordered differently, which
+    makes their results awkward to compare for no real reason.
+
+    Returns a tuple, so it can be used as a module-level constant without the
+    aliasing risk a list would carry.
+    """
+    return tuple(sorted(filter_names, key=filter_mean_wavelength))
+
+
 def model_wavel_range(tag, db_path=None):
     """Wavelength coverage (um) actually stored for `tag` in the database.
 
