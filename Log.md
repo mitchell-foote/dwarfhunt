@@ -396,7 +396,15 @@ Secondly, I'm going to have claude add a magnitude caching layer, and go through
 
 ## 2026-08-22
 
-I've completed the changes, and we've run the filters. In order to get the best filter combo possible, we're going to add a hold out set, to test the top 5 filter combinations after we run that search. From my research, that's to help prevent Winner's Curse from skewing our results. 
+With the caching and the filters that I have available, I want to make sure that we do a good statisical setup so that we can rely on some of these numbers for the red-dragon work. 
+
+> As a note, we're not using data that has error bars, because of this, we're going to modify the `reg_covar` so that it doesn't attempt to make connections in the data that wouldn't normally exist with real data. This also helps with our K choices. 
+
+So here's the plan: 
+1. At the beginning, we're going to take 30% of the data, and seal it away as a final scoring for our top chosen models. This allows us to make sure that we don't get bias from runs that are particularly favorable to a certain filter breakdown.
+2. We then run multiple subset, seed, and K selection inside the filter pool with the remaining data, calculating results, giving us a list of 5 finalists.
+3. We then refit on the whole pool, and scored on the holdout data once. 
+4. We then report that scored number.
 
 Based on this holdout group, we got the following results. 
 
@@ -411,3 +419,81 @@ Based on this holdout group, we got the following results.
 So it looks like for best on the holdout data, we've got F770W+F1000W+F1065C+F1140C. 
 
 My next step is to add some additional data, specifically in the galaxy area, so that we can have a larger pool. I'll start by adding in some of the AGN data, the 0.1, 0.2, and 0.3 datasets. 
+
+### Extra Galaxy Data Exp
+
+So we re-ran the data with the additional files:
+
+MIR0.1, MIR0.4, MIR0.6, MIR0.8, MIR0.9. 
+
+These provide more galaxy points surrounding those that we've already done. We still have some in reserve (MIR0.2, 0.3, and 0.7), if we decide that we need more data. 
+
+With those extra files, we got the following results.
+
+#### Single run
+
+Chosen K: 8
+
+Balanced Accuracy Score: 0.9972
+
+Faling Dwarfs: 0/200 Misclassified
+
+Failing Galaxies: 1/180 Misclassified coming from AGN 0.1
+
+#### 20 seeded runs with std
+
+Balanced Accuracy with 20 seeds: `0.991 +- 0.0024`
+
+As a reminder, this includes the following filters
+
+F770W F1000W F1065C F1140C F1280W F1550C
+
+However, it looks like from the other filter breakdowns, (F770W F1000W F1065C F1140C F1280W), we're getting balanced accuracy scores of `0.9995 +- 0.0017`
+
+The entire breakdown is as follows:
+
+| colors|filters|bal. acc (mean +- std)|K median [min-max] |
+|---|---|---|---|
+| 2   |    F770W F1000W F1065C               |  `0.9092 +- 0.0148`       |     8 [4-11] |
+| 3   |    F770W F1000W F1065C F1140C        |  `0.9959 +- 0.0019`        |    10 [8-14] |
+| 4   |    F770W F1000W F1065C F1140C F1280W |  `0.9995 +- 0.0017 `       |    12 [11-13] |
+| 5   |    F770W F1000W F1065C F1140C F1280W F1550C | `0.9991 +- 0.0024`   |         13 [10-15] |
+
+
+#### Filter Combination testing
+
+Doing the same experiement with the held out data with the following params:
+
+**Search Pool**: 1064 
+
+**Holdout**: 456 (240 dwarfs, 216 galaxies)
+
+##### Top filters Pre-holdout
+
+>**edge** is how many K values were detected at the edge of the range
+
+|rank |  search  |   std  |  K | edge | filters |
+|---|---|---|---|---|---|
+|   1  | 1.0000 | 0.0000  |  9  |   0 | F1000W+F1065C+F1280W+F1550C |
+|   2  | 1.0000 | 0.0000  | 12  |   0 | F770W+F1000W+F1065C+F1140C+F1550C |
+|   3  | 1.0000 | 0.0000  | 13  |  0 | F770W+F1000W+F1065C+F1280W+F1550C |
+|   4  | 1.0000 | 0.0000 |  14   |  0 | F770W+F1000W+F1065C+F1140C+F1280W+F1550C |
+|   5  | 0.9996 | 0.0012  | 11  |   0 | F770W+F1000W+F1065C+F1140C+F1280W |
+
+We also determined that the winner's curse (or the expected inflation of the best-of-N score), which helps us find true differences that are distinguishable from lucky data draws. 
+
+Curse = 0.0088
+
+##### Filters with the holdout data
+
+|  search |  holdout  |   drop  |  K | filters |
+|---------|-----------|---------|---|----------|
+|  1.0000 |   1.0000 | +0.0000  | 11 | F1000W+F1065C+F1280W+F1550C |
+|  1.0000 |   1.0000 | +0.0000  | 13 | F770W+F1000W+F1065C+F1140C+F1550C |
+|  1.0000  |  1.0000 | +0.0000  | 15 | F770W+F1000W+F1065C+F1280W+F1550C |
+|  1.0000  |  1.0000 | +0.0000  | 12 | F770W+F1000W+F1065C+F1140C+F1280W+F1550C |
+|  0.9996  |  1.0000 | -0.0004  | 13 | F770W+F1000W+F1065C+F1140C+F1280W |
+
+As you can see from the graph, the best on the holdout (with the lowest amount of filters) is:
+
+**F1000W+F1065C+F1280W+F1550C**
