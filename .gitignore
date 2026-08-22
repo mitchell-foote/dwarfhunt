@@ -90,3 +90,8 @@ htmlcov/
 # Baseline archives from tools/capture_baseline.py -- machine-local, and large.
 baseline*.npz
 
+
+# Cached per-filter magnitudes (dwarfhunt.photometry). Regenerable from the
+# model grid and templates, keyed on the sample parameters, and large enough to
+# be noise in a diff. cache/missing_grid_points.json stays tracked.
+cache/photometry/

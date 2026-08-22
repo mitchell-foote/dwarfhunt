@@ -185,7 +185,7 @@ class GMMClassifier:
     """
 
     def __init__(self, n_components=2, covariance_type: Literal['full', 'tied', 'diag', 'spherical'] = "full", n_init=10,
-                 random_state=0):
+                 random_state=0, reg_covar=1e-6):
         # n_init=10 (best-of-10-restarts by likelihood) is what actually
         # stabilizes the fit across seeds -- see Log.md 2026-08-05. Earlier
         # notes there attributed that stability to n_components; it was
@@ -195,6 +195,29 @@ class GMMClassifier:
         self.covariance_type : Literal['full', 'tied', 'diag', 'spherical'] = covariance_type
         self.n_init = n_init
         self.random_state = random_state
+
+        # Floor added to every covariance diagonal. sklearn's default (1e-6) is
+        # meant to stop a singular matrix, but it doubles as the smallest scale
+        # the model is allowed to treat as real -- and that matters here far
+        # more than usual, because these colors carry no scatter at all. Dwarf
+        # colors are an exact function of (teff, logg, feh) since radius cancels
+        # in a color, and galaxy colors an exact function of z, so both
+        # populations lie on noiseless manifolds. A component can then shrink
+        # into the manifold and gain likelihood limited only by this floor.
+        #
+        # Measured on manifold-shaped data at d=3, the BIC argmin depends on the
+        # floor once n_init is large enough to find those solutions:
+        #
+        #     n_init=1,  reg_covar=1e-6 -> K=7      n_init=1,  1e-3 -> K=7
+        #     n_init=10, reg_covar=1e-6 -> K=20     n_init=10, 1e-3 -> K=7
+        #
+        # So a K chosen at the default floor is partly reporting the floor
+        # rather than the populations. Raising reg_covar is the substitute for
+        # the photometric uncertainty a model-only study does not have: it says
+        # "no structure finer than this scale is real".
+        #
+        # Default stays at sklearn's 1e-6 so existing results are unchanged.
+        self.reg_covar = reg_covar
 
     def fit(self, X, y):
         X = np.asarray(X)
@@ -213,6 +236,7 @@ class GMMClassifier:
                 covariance_type=self.covariance_type,
                 random_state=self.random_state,
                 n_init=self.n_init,
+                reg_covar=self.reg_covar,
             ).fit(X)
 
         self.assert_finite()

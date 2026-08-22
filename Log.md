@@ -382,6 +382,32 @@ I'll add a results table below.
 Ok! Here's some results
 1. Adding F1280W boosted BA to 0.9872 +- 0.0059, which is +62.8% +- 3.2% (per split, n=20)
 
+## 2026-08-21
+
+Ok, with each run, I'm realizing that I'm missing what could be the optimal filters, and doing so manually is going to take forever, and isn't conducive to the notebook I currently have. 
+
+In addition, I did more research on the K value issues I was running into. Turns out, because my data doesn't have error information, the reg_covar is grabbing every bit of information it can, which drives down the BIC. Solution to this is to up the reg_covar from 1e-6 to 1e-3. This tells it to ignore data that small, with should make the K values less agressive. 
+
+So we're going to do two things. 
+
+First, we're going to add the ability to modify the reg_covar to the GMMClassifier. This'll allow us to make sure that we don't encode structure that doesn't exist, and have the correct K. 
+
+Secondly, I'm going to have claude add a magnitude caching layer, and go through all of the possible filter combinations to determine a top three configuration. 
+
+## 2026-08-22
+
+I've completed the changes, and we've run the filters. In order to get the best filter combo possible, we're going to add a hold out set, to test the top 5 filter combinations after we run that search. From my research, that's to help prevent Winner's Curse from skewing our results. 
+
+Based on this holdout group, we got the following results. 
+
+  search   holdout     drop    K  filters
+  1.0000    1.0000  +0.0000   11  F770W+F1000W+F1065C+F1140C
+  1.0000    1.0000  +0.0000   15  F770W+F1000W+F1065C+F1140C+F1280W+F1550C
+  0.9985    1.0000  -0.0015   16  F770W+F1000W+F1065C+F1140C+F1550C
+  0.9978    1.0000  -0.0022   12  F770W+F1000W+F1065C+F1140C+F1280W
+  0.9971    1.0000  -0.0029   13  F770W+F1065C+F1140C+F1280W
 
 
+So it looks like for best on the holdout data, we've got F770W+F1000W+F1065C+F1140C. 
 
+My next step is to add some additional data, specifically in the galaxy area, so that we can have a larger pool. I'll start by adding in some of the AGN data, the 0.1, 0.2, and 0.3 datasets. 
