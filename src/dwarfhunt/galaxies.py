@@ -213,22 +213,6 @@ def translate_k15_L_v_to_f_lambda(wavelengths, fluxes):
     translated_fluxes = (fluxes * c) / (wavelengths_m ** 2)
     return translated_fluxes
 
-def synth_mags_k15(wavelength, flux, filter_names):
-    """
-    Calculate synthetic magnitudes for a given list of filters using K15 data.
-
-    spectrum_to_magnitude returns ((apparent, error), (absolute, error)); this keeps
-    only the apparent-magnitude tuple per filter, same as the original notebook cell
-    -- callers that just want the scalar apparent magnitude take item[0] of each
-    entry (see get_full_redshift_mag_loop and galaxy_color_color_data below).
-    """
-    mag_list = []
-    for filter_name in filter_names:
-        filters_data = SyntheticPhotometry(filter_name).spectrum_to_magnitude(wavelength, flux)
-        mag_list.append(filters_data[0])
-    return mag_list
-
-
 def check_filters_fit_k15_templates(file, filter_names=DEFAULT_FILTERS,
                                     redshifts=DEFAULT_REDSHIFTS):
     """Raise ValueError for any filter the redshifted template cannot cover.

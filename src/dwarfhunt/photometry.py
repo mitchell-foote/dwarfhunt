@@ -65,6 +65,38 @@ def _key_digest(key):
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
+def _normalise_seed(rng):
+    """Reduce a seed to something the cache key can actually carry.
+
+    `_key_digest` serialises with `default=str`, which quietly turns anything
+    non-JSON into a string, and that breaks the key in two different ways:
+
+    - `np.int64(2)` is stored as the string "2" but requested as np.int64(2), so
+      `_load_entry`'s equality check fails and every read raises the alarming
+      "written for a different sample" error even though the sample is fine.
+    - a `Generator` stringifies with its memory address, so the filename hash
+      differs every process. The cache never hits, a FRESH RANDOM SAMPLE is
+      drawn on every run, and the numbers move with no signal at all -- exactly
+      what the module docstring above promises cannot happen.
+
+    So integers are normalised to one representation, and anything that cannot
+    identify a sample is refused here rather than allowed to poison the key.
+    """
+    if rng is None:
+        raise ValueError(
+            "rng=None does not identify a sample, so the cache key cannot "
+            "distinguish two different draws. Pass an integer seed.")
+
+    if isinstance(rng, (int, np.integer)) and not isinstance(rng, bool):
+        return int(rng)
+
+    raise TypeError(
+        f"rng must be an integer seed, got {type(rng).__name__}. Pass the seed "
+        "itself, not a Generator: a Generator stringifies with its memory "
+        "address, so every run would hash to a different cache entry and "
+        "silently resample the population.")
+
+
 def _load_entry(path, key):
     if not path.exists():
         return None
@@ -88,7 +120,7 @@ def _save_entry(path, key, columns):
 
 
 def planet_magnitudes(model_tag, filter_names, *, num_samples, radius_range,
-                      distance=10, rng=None, deny=None, cache_dir=None,
+                      rng, distance=10, deny=None, cache_dir=None,
                       refresh=False, verbose=True):
     """Planet sample plus abs_mag_/flux_ columns for every filter in `filter_names`.
 
@@ -100,6 +132,10 @@ def planet_magnitudes(model_tag, filter_names, *, num_samples, radius_range,
     same draw today, but reusing the stored arrays means a filter added months
     later is guaranteed to describe the same objects even if the sampler's
     internals change.
+
+    `rng` is a required integer seed, not optional and not a Generator -- see
+    _normalise_seed. An unseeded draw cannot be named by the cache key, so
+    `refresh=True` would swap the population out from under an unchanged key.
     """
     cache_dir = Path(cache_dir) if cache_dir else default_cache_dir()
     key = {
@@ -109,7 +145,7 @@ def planet_magnitudes(model_tag, filter_names, *, num_samples, radius_range,
         "num_samples": int(num_samples),
         "radius_range": [float(radius_range[0]), float(radius_range[1])],
         "distance": float(distance),
-        "rng": rng,
+        "rng": _normalise_seed(rng),
         "deny": _key_digest(deny) if deny else None,
     }
     path = cache_dir / f"planets_{model_tag}_{_key_digest(key)}.npz"

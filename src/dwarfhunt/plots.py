@@ -428,12 +428,29 @@ def plot_decision_regions(ax, clf, X, y, resolution=300, class_colors=None,
     else:
         raise ValueError(f'mode must be "marginal" or "slice", got {mode!r}')
 
-    class_index = {c: i for i, c in enumerate(classes)}
+    # The shaded regions come from the CLASSIFIER, which knows every class it was
+    # trained on -- not just the ones present in the `y` handed to this panel. So
+    # the index has to span both. Building it from np.unique(y) alone made
+    # np.vectorize(class_index.get) return None for any class the classifier
+    # predicted but the plotted subset did not contain, and the only symptom was
+    # "TypeError: int() argument must be ... not 'NoneType'" from inside
+    # np.vectorize, which names nothing useful. Plotting one class's failures, or
+    # any row subset, is enough to hit it.
+    region_classes = list(classes)
+    region_classes += [c for c in np.unique(grid_pred) if c not in region_classes]
+
+    # Colour any extra class without disturbing what the caller pinned, so a
+    # shared class_colors dict still means the same thing in every panel.
+    if len(region_classes) > len(classes):
+        fallback = class_color_map(region_classes)
+        class_colors = {**{c: fallback[c] for c in region_classes}, **class_colors}
+
+    class_index = {c: i for i, c in enumerate(region_classes)}
     zz = np.vectorize(class_index.get)(grid_pred).reshape(xx.shape)
 
-    region_cmap = ListedColormap([class_colors[c] for c in classes])
+    region_cmap = ListedColormap([class_colors[c] for c in region_classes])
     keep_x, keep_y = ax.get_xlim(), ax.get_ylim()
-    ax.contourf(xx, yy, zz, levels=np.arange(len(classes) + 1) - 0.5,
+    ax.contourf(xx, yy, zz, levels=np.arange(len(region_classes) + 1) - 0.5,
                cmap=region_cmap, alpha=0.25, zorder=0)
     ax.set_xlim(keep_x)
     ax.set_ylim(keep_y)

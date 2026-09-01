@@ -97,6 +97,17 @@ def balanced_accuracy(y_true, y_pred, classes=None):
         if n == 0:
             continue
         recalls.append(np.sum(in_class & (y_pred == c)) / n)
+
+    if not recalls:
+        # Every class was skipped by the n == 0 guard above, so np.mean([]) would
+        # return nan with two numpy warnings and nothing else. A nan landing in a
+        # score table reads as a real number that happens to be missing; it is
+        # actually a sign that `classes` and `y_true` describe different things.
+        raise ValueError(
+            f"none of classes={np.asarray(classes).tolist()} appear in y_true "
+            f"(which holds {np.unique(y_true).tolist()}), so there is no recall "
+            "to average. Check that `classes` matches the labels being scored.")
+
     return float(np.mean(recalls))
 
 

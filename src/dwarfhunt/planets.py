@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 
 from contextlib import contextmanager
@@ -62,6 +61,13 @@ def scan_missing_grid_points(tag, db_path=None):
     db_path = db_path if db_path is not None else default_db_path()
 
     with h5py.File(db_path, "r") as hdf:
+        if f"models/{tag}" not in hdf:
+            # h5py's own KeyError names the missing tag but not the alternatives,
+            # and a typo'd tag is the usual cause.
+            available = sorted(hdf["models"]) if "models" in hdf else []
+            raise KeyError(
+                f"{db_path} has no model {tag!r}. Available: {available}")
+
         group = hdf[f"models/{tag}"]
         params = [group.attrs[f"parameter{i}"] for i in range(group.attrs["n_param"])]
         axes = {param: group[param][:] for param in params}
@@ -103,38 +109,57 @@ def denied_axis_values(params, axes, mask):
     return dropped
 
 
+def _scan_one(tag, db_path):
+    """Scan a single tag and return its deny-list entry."""
+    params, axes, mask = scan_missing_grid_points(tag, db_path)
+
+    combos = [
+        [float(axes[param][i]) for param, i in zip(params, idx)]
+        for idx in np.argwhere(mask)
+    ]
+
+    entry = {
+        "params": params,
+        "denied_axis_values": denied_axis_values(params, axes, mask),
+        "combos": combos,
+    }
+
+    print(
+        f"{tag}: {len(combos)} missing grid points"
+        f" -> drop {entry['denied_axis_values']}"
+    )
+
+    return entry
+
+
 def load_deny_list(tags, db_path=None, path=None, rebuild=False):
-    """Load the cached deny-list, scanning the database the first time."""
+    """Deny-list entries for `tags`, scanning the database for anything missing.
+
+    The cache file is a {tag: entry} map and is checked TAG BY TAG, never
+    wholesale. An earlier version returned `json.loads(path.read_text())` as soon
+    as the file existed, whatever had been asked for -- so once the file held the
+    two Elf Owl tags, asking for any other tag handed back the Elf Owl entries
+    and no rescan happened. generate_planet_arrays then found no entry for its
+    model, applied no denial at all, and could sample a grid point with no
+    spectrum; the only symptom was NaN magnitudes appearing much later.
+
+    So: tags already in the file are reused, tags that are not are scanned and
+    merged in, and the return value holds exactly `tags` -- a missing key is
+    then impossible rather than silent. Other tags stay in the file, since
+    scanning one costs a pass over the whole flux array.
+    """
     db_path = db_path if db_path is not None else default_db_path()
     path = path if path is not None else default_deny_path()
 
-    if path.exists() and not rebuild:
-        return json.loads(path.read_text())
+    cached = json.loads(path.read_text()) if path.exists() else {}
 
-    deny = {}
+    missing = [t for t in tags if rebuild or t not in cached]
+    if missing:
+        for tag in missing:
+            cached[tag] = _scan_one(tag, db_path)
+        path.write_text(json.dumps(cached, indent=1))
 
-    for tag in tags:
-        params, axes, mask = scan_missing_grid_points(tag, db_path)
-
-        combos = [
-            [float(axes[param][i]) for param, i in zip(params, idx)]
-            for idx in np.argwhere(mask)
-        ]
-
-        deny[tag] = {
-            "params": params,
-            "denied_axis_values": denied_axis_values(params, axes, mask),
-            "combos": combos,
-        }
-
-        print(
-            f"{tag}: {len(combos)} missing grid points"
-            f" -> drop {deny[tag]['denied_axis_values']}"
-        )
-
-    path.write_text(json.dumps(deny, indent=1))
-
-    return deny
+    return {tag: cached[tag] for tag in tags}
 
 
 # The Elf Owl grids are the ones with missing spectra, so they are what the
@@ -278,6 +303,40 @@ def put_filters_in_wavelength_order(filter_names):
     aliasing risk a list would carry.
     """
     return tuple(sorted(filter_names, key=filter_mean_wavelength))
+
+
+def assert_wavelength_ordered(filter_names):
+    """Raise unless `filter_names` runs blue to red. Returns them unchanged.
+
+    The companion check to put_filters_in_wavelength_order. Everything
+    downstream that builds adjacent-pair colours -- color_pairs' "bluer minus
+    redder" convention, search.colour_names, and the n-1 colour basis the
+    subset sweep is built on -- pairs filters BY POSITION and cannot tell
+    whether the positions mean anything. Hand it an unordered list and the
+    colours are still computed, still named, and still fitted; some are simply
+    the negative of what their name says.
+
+    That is a sign flip with no exception, which is why this is a hard check
+    rather than a warning. It takes full species filter names because that is
+    the only form a mean wavelength can be read from -- a bare label like
+    "F1065C" carries no wavelength, and the name is not a reliable guide anyway
+    (see filter_mean_wavelength for the WISE.W3 case).
+    """
+    names = list(filter_names)
+    means = [filter_mean_wavelength(n) for n in names]
+
+    out_of_order = [i for i in range(len(means) - 1) if means[i] > means[i + 1]]
+    if out_of_order:
+        shown = ", ".join(f"{n} ({m:.2f} um)" for n, m in zip(names, means))
+        raise ValueError(
+            f"filters are not in wavelength order: {shown}. Adjacent-pair "
+            "colours are built by position, so this would silently flip the "
+            "sign of the colours across "
+            f"{', '.join(f'{names[i]}/{names[i + 1]}' for i in out_of_order)}. "
+            "Run the list through put_filters_in_wavelength_order first."
+        )
+
+    return names
 
 
 def model_wavel_range(tag, db_path=None):

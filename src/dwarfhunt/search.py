@@ -43,9 +43,18 @@ from .planets import color_pairs
 def colour_names(labels):
     """Adjacent-pair colour names for a filter subset, blue minus red.
 
-    Assumes `labels` is already in wavelength order -- see
-    planets.put_filters_in_wavelength_order. n filters give n-1 independent
-    colours; adjacent pairs are one such basis.
+    Assumes `labels` is already in wavelength order. This module cannot verify
+    that: it works in bare labels ("F1065C"), which carry no wavelength, and it
+    deliberately holds no species dependency -- the whole point of the cached
+    magnitude tables is that a subset sweep is pure arithmetic. So the check
+    lives one level up, where the full filter names still exist: run the filter
+    list through planets.put_filters_in_wavelength_order (or assert it with
+    planets.assert_wavelength_ordered) before deriving the labels handed here.
+
+    Out of order, nothing raises -- the colours are still computed and still
+    named, but some are the negative of what their name says.
+
+    n filters give n-1 independent colours; adjacent pairs are one such basis.
     """
     return [f"{blue} - {red}" for blue, red in zip(labels, labels[1:])]
 
@@ -121,6 +130,10 @@ def search_subsets(labels, planet_mags, galaxy_mags, y, *, sizes,
         is fine for exploration but leaves no clean data to report on.
     """
     labels = list(labels)
+    # asarray, because search_rows is an index array and `y[search_rows]` below
+    # raises "only integer scalar arrays can be converted to a scalar index" on
+    # a plain list -- a confusing error a long way from the actual cause.
+    y = np.asarray(y)
     results = []
     all_subsets = [s for m in sizes for s in combinations(labels, m)]
     for n, subset in enumerate(all_subsets, 1):

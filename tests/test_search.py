@@ -77,6 +77,44 @@ def test_select_k_flags_a_boundary_hit():
     assert 2 <= k <= 7
 
 
+def test_search_accepts_a_list_y(tmp_path):
+    """search_rows is an index array, so a plain list y used to die with
+    "only integer scalar arrays can be converted to a scalar index"."""
+    labels, planet, galaxies, y = _fake_mags(n_planets=40, n_z=15)
+    out = S.search_subsets(labels, planet, galaxies, list(y), sizes=[3],
+                           k_candidates=[2, 3], reg_covar=1e-3,
+                           search_rows=np.arange(50), n_seeds=2, n_init=1)
+    assert out and 0.0 <= out[0]["mean"] <= 1.0
+
+
+def test_wavelength_order_is_checked_where_wavelengths_exist():
+    """colour_names pairs BY POSITION, so an unordered list silently flips the
+    sign of some colours. search.py holds bare labels and cannot see that, so
+    the guard lives in planets, on the full filter names."""
+    from dwarfhunt import planets
+
+    ordered = ("JWST/MIRI.F1065C", "JWST/MIRI.F1140C", "JWST/MIRI.F1550C")
+    assert planets.assert_wavelength_ordered(ordered) == list(ordered)
+
+    with pytest.raises(ValueError, match="not in wavelength order"):
+        planets.assert_wavelength_ordered(ordered[::-1])
+
+
+def test_wavelength_order_uses_the_bandpass_not_the_name():
+    """WISE.W3 is nominally "12 um" and sorts to the red end by name, but its
+    bandpass means 12.8 um, which places it between F1140C and F1550C."""
+    from dwarfhunt import planets
+
+    mixed = ("JWST/MIRI.F1065C", "JWST/MIRI.F1140C", "JWST/MIRI.F1550C",
+             "WISE/WISE.W3")
+    with pytest.raises(ValueError, match="not in wavelength order"):
+        planets.assert_wavelength_ordered(mixed)
+
+    fixed = planets.put_filters_in_wavelength_order(mixed)
+    assert planets.assert_wavelength_ordered(fixed) == list(fixed)
+    assert fixed.index("WISE/WISE.W3") == 2
+
+
 def test_winners_curse_grows_with_candidate_count():
     a = S.winners_curse(1, 0.02, 10, trials=400)
     b = S.winners_curse(50, 0.02, 10, trials=400)

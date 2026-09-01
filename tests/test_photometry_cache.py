@@ -66,6 +66,35 @@ def test_every_sample_parameter_changes_the_key(changed):
     assert _key_digest(base) != _key_digest(other), changed
 
 
+def test_equivalent_integer_seeds_reach_one_entry(tmp_path):
+    """rng=2 and rng=np.int64(2) are the same sample and must share a cache entry.
+
+    _key_digest serialises with default=str, so a numpy integer used to be
+    stored as the string "2" while the requested key still held np.int64(2).
+    The two never compared equal, and every read raised the "written for a
+    different sample" error above -- about a sample that was in fact identical.
+    """
+    seeded = {k: v for k, v in SAMPLE.items() if k != "rng"}
+    a = planet_magnitudes("sonora-bobcat", [F1], rng=2, cache_dir=tmp_path,
+                          verbose=False, **seeded)
+    b = planet_magnitudes("sonora-bobcat", [F1], rng=np.int64(2), cache_dir=tmp_path,
+                          verbose=False, **seeded)
+
+    assert np.array_equal(a["teff"], b["teff"])
+    assert len(list(tmp_path.glob("planets_*.npz"))) == 1, "seeds split the cache"
+
+
+@pytest.mark.parametrize("bad", [np.random.default_rng(2), None])
+def test_a_seed_that_cannot_name_a_sample_is_refused(bad, tmp_path):
+    """A Generator stringifies with its memory address, so it hashes differently
+    every process: the cache would never hit, a fresh random sample would be
+    drawn on every run, and the numbers would move with no signal at all."""
+    seeded = {k: v for k, v in SAMPLE.items() if k != "rng"}
+    with pytest.raises((TypeError, ValueError), match="integer seed"):
+        planet_magnitudes("sonora-bobcat", [F1], rng=bad, cache_dir=tmp_path,
+                          verbose=False, **seeded)
+
+
 def test_key_mismatch_on_read_raises(tmp_path):
     """Filename hashes are a convenience; the stored key is the source of truth."""
     path = tmp_path / "entry.npz"
