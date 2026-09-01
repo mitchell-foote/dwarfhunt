@@ -497,3 +497,42 @@ Curse = 0.0088
 As you can see from the graph, the best on the holdout (with the lowest amount of filters) is:
 
 **F1000W+F1065C+F1280W+F1550C**
+
+## 2026-08-23
+
+Ok, so we're in a good place to stop and do some polishing. We've been able to answer the question, "Is it possible to use the JWST filters and a GMM to separate these populations?". The answer is yes, theoretically. These measurements don't have any error bounds, so they won't 100% hold up once we start getting larger error spaces. That's a good exploration for the future, but a good question for Zac on the direction he wants to go. 
+
+As part of the polishing process, I want to do the following:
+
+1. I want to polish up the comments in the pop-separation notebook, as well as move the galaxy tracks be in alphabetical order. 
+2. I want Claude to do a code review in the dwarfhunt src package, as well as look through the pop-separation notebook for other functions that can be moved off and make generic. 
+3. Update the README.md to talk about all of the different elements, the src folder, and have things be a bit more exaustive. 
+4. Create an experiment to simulate data that has errors baked into it. 
+
+## 2026-08-31
+
+Ok, we started with number 1 and 4, which gives us the following data. 
+
+Basically, the gmm we created stays solid at BA = 1 up until you get a variance of 0.05 mag. Once you get past that, things degrade quickly. Here's what we did to determine that. 
+
+- We ran two experiements. Clean training data -> noisy scoring data, and then noisy training data to noisy scoring data. We selected a random `sigma` at various max values away, and we added those `sigmas` to the cached magnitudes of the galaxy and dwarf data. We added the errors to the magnitude, as thats what would occur in the real world, making it a better representation and experiment. We then recalculated with the K that worked best for them, and found the BA. 
+- For the very low `sigma`, we didn't see any change. This is due to the REG_COVAR that we have set throughout the experiment to help with some of the ML elements of having non-error data. So the error bars were there, but there weren't visable. 
+- Our first dip occurred at `0.05`, but still in a .99 range. Beyond that, the farther we got away, the error exponentially effected the BA. I had claude help build a graph to showcase it. I'll include the table below of the results. 
+
+| sigma    |  noisy-train | clean-train |   Median  K  |  K-range |
+|---|---|---|---|---|
+ 0.000   | 1.0000 +- 0.0000 | 1.0000 +- 0.0000 |   14 | 13-16       |
+ 0.005   | 1.0000 +- 0.0000 | 1.0000 +- 0.0000 |   13 | 13-16       |
+ 0.010 | 1.0000 +- 0.0000 | 1.0000 +- 0.0000 |   12 | 12-14       |
+ 0.020   | 1.0000 +- 0.0000 | 1.0000 +- 0.0000 |   13 | 12-15       |
+ 0.050   | 0.9954 +- 0.0057 | 0.9951 +- 0.0055 |    9  | 8-11       |
+ 0.100   | 0.9850 +- 0.0067 | 0.9450 +- 0.0349 |    7 |  7-8        |
+ 0.150  | 0.9387 +- 0.0061 | 0.8470 +- 0.0375 |    5  | 5-5        |
+ 0.200   | 0.8883 +- 0.0371 | 0.7554 +- 0.0371 |    4  | 4-5        |
+ 0.300  | 0.7397 +- 0.0320 | 0.6552 +- 0.0180 |    3 |  2-3        |
+ 0.500  | 0.5546 +- 0.0386 | 0.5642 +- 0.0219 |    2  | 2-2        |
+
+
+ With this data, we can now go to Zac and talk about what we want to do with Red Dragon, as it helps with errors by using extreme deconvolution. 
+
+ 
