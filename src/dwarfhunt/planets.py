@@ -109,6 +109,32 @@ def denied_axis_values(params, axes, mask):
     return dropped
 
 
+def _grid_shape(tag, db_path):
+    """The stored flux array's shape for `tag` -- a cheap fingerprint of what's
+    actually in the database right now.
+
+    Reading a dataset's `.shape` from HDF5 is metadata only; nothing is read off
+    disk, so this costs nothing next to scan_missing_grid_points' full pass over
+    the flux array. A separate function, like _scan_one, so tests can substitute
+    it without a real database.
+
+    Which grid POINTS are missing is a property of which raw spectrum files
+    species extracted from the .tgz -- unaffected by add_model's wavel_range or
+    wavel_sampling, which only resample an existing point, not add or remove
+    one. So narrowing wavel_range and re-adding a model does not, by itself,
+    change what belongs in the deny-list. But the flux array's shape changes
+    every time wavel_range/wavel_sampling does (the last axis is the wavelength
+    count), and it would also change if the tag were ever rebuilt from a
+    genuinely different set of files (a teff_range subset, an updated species
+    version, a different upstream release under the same tag) -- exactly the
+    cases where the cached deny-list entry might no longer describe the grid
+    that's actually in the database. Shape is a cheap enough signal to catch all
+    of these without re-deriving what specifically changed.
+    """
+    with h5py.File(db_path, "r") as hdf:
+        return list(hdf[f"models/{tag}/flux"].shape)
+
+
 def _scan_one(tag, db_path):
     """Scan a single tag and return its deny-list entry."""
     params, axes, mask = scan_missing_grid_points(tag, db_path)
@@ -122,6 +148,7 @@ def _scan_one(tag, db_path):
         "params": params,
         "denied_axis_values": denied_axis_values(params, axes, mask),
         "combos": combos,
+        "grid_shape": _grid_shape(tag, db_path),
     }
 
     print(
@@ -147,13 +174,31 @@ def load_deny_list(tags, db_path=None, path=None, rebuild=False):
     merged in, and the return value holds exactly `tags` -- a missing key is
     then impossible rather than silent. Other tags stay in the file, since
     scanning one costs a pass over the whole flux array.
+
+    A cached tag is reused only if its stored `grid_shape` still matches the
+    live database -- see _grid_shape. Without this, re-adding a model (a
+    narrower wavel_range for a different notebook, a re-extraction, an updated
+    species version) would silently keep an old deny-list that might no longer
+    match: generate_planet_arrays' own consistency check only verifies the
+    deny-list is internally coherent, not that it still describes the grid
+    that's actually being sampled from. A tag whose shape doesn't match is
+    treated exactly like a tag that was never cached: rescanned, not warned
+    about and used anyway, because a deny-list that permits an all-zero
+    spectrum through is the same silent NaN-much-later failure this cache
+    exists to prevent.
     """
     db_path = db_path if db_path is not None else default_db_path()
     path = path if path is not None else default_deny_path()
 
     cached = json.loads(path.read_text()) if path.exists() else {}
 
-    missing = [t for t in tags if rebuild or t not in cached]
+    stale = [t for t in tags if t in cached and not rebuild
+             and cached[t].get("grid_shape") != _grid_shape(t, db_path)]
+    if stale:
+        print(f"deny-list: {stale} changed shape in the database since the "
+              "cache was written -- rescanning rather than reusing a stale entry")
+
+    missing = [t for t in tags if rebuild or t not in cached or t in stale]
     if missing:
         for tag in missing:
             cached[tag] = _scan_one(tag, db_path)
@@ -438,6 +483,80 @@ def color_pairs(mags_by_filter, order=None):
         for i in range(len(labels))
         for j in range(i + 1, len(labels))
     }
+
+
+def merge_planet_populations(populations, source_key="source_model"):
+    """Concatenate several planet-array dicts into one.
+
+    populations : dict[str, dict[str, ndarray]]
+        e.g. {"sonora-elfowl-t": elfowl_t, "sonora-elfowl-y": elfowl_y}, each
+        value shaped like planet_magnitudes' return: one 1-D array per column,
+        every column the same length within that dict. Elf Owl's -t and -y
+        grids are the case this exists for -- same five parameters (teff,
+        logg, feh, c_o_ratio, log_kzz), non-overlapping teff axes
+        (575-1200 K vs 275-550 K) -- so merging them is just "the same kind
+        of row, twice," and downstream code (add_color_columns,
+        color_color_matrix, the GMM) should see one population, the way
+        bobcat_planets was one dict for a single model tag.
+    source_key : str
+        Name of the added column recording which population each row came
+        from. teff alone happens to disambiguate Elf Owl -t from -y since
+        their axes don't overlap, but that's a property of this particular
+        pair of grids, not something worth relying on -- an explicit column
+        holds regardless of what's merged, and a "which dwarfs fail" plot can
+        color by family without re-deriving it from a temperature cut.
+
+    Every population must expose exactly the same set of columns. This is
+    checked rather than merging on the intersection or padding the rest with
+    NaN: computing two calls with different filter_names (or a partially warm
+    cache) is exactly the kind of mismatch that should fail here, loudly,
+    rather than silently drop a filter from one side of the population or
+    hand back a column that is NaN for every -y row and nobody notices until
+    a plot looks wrong.
+
+    Returns
+    -------
+    dict, one array per shared column (concatenated in `populations`'
+    insertion order) plus `source_key` -> array of the tag string that
+    produced each row.
+    """
+    tags = list(populations)
+    if not tags:
+        raise ValueError("merge_planet_populations needs at least one population")
+
+    key_sets = {tag: set(populations[tag]) for tag in tags}
+    all_keys = set.union(*key_sets.values())
+
+    mismatched = {tag: cols for tag, cols in key_sets.items() if cols != all_keys}
+    if mismatched:
+        detail = "\n".join(
+            f"  {tag}: missing {sorted(all_keys - cols)}"
+            for tag, cols in mismatched.items()
+        )
+        raise ValueError(
+            "populations do not share the same columns -- concatenating them "
+            "would silently drop whatever a shorter dict is missing instead "
+            f"of raising here, where it's traceable:\n{detail}\n"
+            "Compute every population with the same filter_names (and the "
+            "same cache state), or drop the extra columns before merging."
+        )
+
+    if source_key in all_keys:
+        raise ValueError(
+            f"{source_key!r} is already a column in these populations -- pass "
+            "a different source_key."
+        )
+
+    n_per_tag = {tag: len(next(iter(populations[tag].values()))) for tag in tags}
+
+    merged = {
+        col: np.concatenate([np.asarray(populations[tag][col]) for tag in tags])
+        for col in all_keys
+    }
+    merged[source_key] = np.concatenate(
+        [np.full(n_per_tag[tag], tag, dtype=object) for tag in tags]
+    )
+    return merged
 
 
 def add_color_columns(planet_data, filter_names=None):

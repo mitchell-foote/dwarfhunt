@@ -630,3 +630,7 @@ Ok, so it looks like we're have the blues that we need from the templates, even 
 Let's have claude take a look at the data to make sure it doesn't see any gotchas with the format, hopefully we'll be able to do apples to apples here. 
 
 Success! I was able to have claude break out the redshift logic into it's own function. With that, I should be able to just use the available helper function to get some similar graphs + data. Adventure for tomorrow. 
+
+## 2026-09-04
+
+Alright, new experiment time. 
