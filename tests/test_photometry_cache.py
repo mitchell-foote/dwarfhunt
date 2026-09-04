@@ -18,11 +18,14 @@ import pytest
 
 from dwarfhunt import paths
 from dwarfhunt.photometry import (_key_digest, _load_entry, _save_entry,
-                                  galaxy_magnitudes, planet_magnitudes)
+                                  galaxy_magnitudes, galaxy_magnitudes_swire,
+                                  planet_magnitudes)
 
 SAMPLE = dict(num_samples=12, radius_range=(0.6, 1.3), distance=10, rng=2)
 F1, F2, F3 = ("JWST/MIRI.F1065C", "JWST/MIRI.F1140C", "JWST/MIRI.F1550C")
 TEMPLATE = paths.galaxy_template("K15_templates/MIR_library/MIR0.0.txt")
+SWIRE_TEMPLATE = paths.galaxy_template("swire-library/Sc_template_norm.sed")
+J, KS = "2MASS/2MASS.J", "2MASS/2MASS.Ks"
 
 
 def test_cache_hit_returns_identical_arrays(tmp_path):
@@ -113,3 +116,42 @@ def test_coverage_guard_fires_even_on_a_cache_hit(tmp_path):
     with pytest.raises(ValueError, match="not covered"):
         galaxy_magnitudes(TEMPLATE, ["2MASS/2MASS.Ks"], redshifts=z,
                           cache_dir=tmp_path, verbose=False)
+
+
+def test_swire_cache_hit_returns_identical_arrays(tmp_path):
+    z = np.linspace(0.0, 2.0, 5)
+    a = galaxy_magnitudes_swire(SWIRE_TEMPLATE, [J], redshifts=z,
+                                cache_dir=tmp_path, verbose=False)
+    b = galaxy_magnitudes_swire(SWIRE_TEMPLATE, [J], redshifts=z,
+                                cache_dir=tmp_path, verbose=False)
+    assert np.array_equal(a["redshift"], b["redshift"])
+    assert np.array_equal(a["mag_J"], b["mag_J"])
+    assert np.all(np.isfinite(a["mag_J"]))
+
+
+def test_swire_adding_a_filter_reuses_the_entry(tmp_path):
+    z = np.linspace(0.0, 2.0, 5)
+    a = galaxy_magnitudes_swire(SWIRE_TEMPLATE, [J], redshifts=z,
+                                cache_dir=tmp_path, verbose=False)
+    b = galaxy_magnitudes_swire(SWIRE_TEMPLATE, [J, KS], redshifts=z,
+                                cache_dir=tmp_path, verbose=False)
+    assert np.array_equal(a["mag_J"], b["mag_J"])
+    assert "mag_Ks" in b
+    assert len(list(tmp_path.glob("galaxy_*.npz"))) == 1
+
+
+def test_swire_and_k15_entries_do_not_collide(tmp_path):
+    """Distinct cache 'kind' keeps the two libraries' entries apart."""
+    z = np.linspace(0.5, 2.0, 5)
+    galaxy_magnitudes_swire(SWIRE_TEMPLATE, [F1], redshifts=z,
+                            cache_dir=tmp_path, verbose=False)
+    galaxy_magnitudes(TEMPLATE, [F1], redshifts=z,
+                      cache_dir=tmp_path, verbose=False)
+    assert len(list(tmp_path.glob("galaxy_*.npz"))) == 2
+
+
+def test_swire_coverage_guard_fires_even_on_a_cache_hit(tmp_path):
+    z = np.array([10.0, 20.0])
+    with pytest.raises(ValueError, match="not covered"):
+        galaxy_magnitudes_swire(SWIRE_TEMPLATE, [J], redshifts=z,
+                                cache_dir=tmp_path, verbose=False)

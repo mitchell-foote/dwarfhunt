@@ -213,18 +213,16 @@ def translate_k15_L_v_to_f_lambda(wavelengths, fluxes):
     translated_fluxes = (fluxes * c) / (wavelengths_m ** 2)
     return translated_fluxes
 
-def check_filters_fit_k15_templates(file, filter_names=DEFAULT_FILTERS,
-                                    redshifts=DEFAULT_REDSHIFTS):
-    """Raise ValueError for any filter the redshifted template cannot cover.
+def _check_filters_fit_template(rest_lo, rest_hi, filter_names, redshifts,
+                                template_name):
+    """Raise ValueError for any filter a redshifted template cannot cover.
 
-    The galaxy-side counterpart to planets.check_filters_fit_model. Without it a
-    coverage mismatch is silent at the point of failure and only surfaces much
-    later as something unrecognizable -- adding 2MASS/2MASS.Ks produced
-    "LinAlgError: SVD did not converge" from np.linalg.matrix_rank, a hundred
-    lines downstream, because the NaN magnitudes rode along in X until something
-    finally tried to factor it.
+    Shared core of check_filters_fit_k15_templates and
+    check_filters_fit_swire_templates -- the redshift geometry and the two
+    failure modes are identical for any library, only the loader that produces
+    (rest_lo, rest_hi) differs.
 
-    redshift_k15_data multiplies wavelengths by (1 + z), so a template spanning
+    Redshifting multiplies wavelengths by (1 + z), so a template spanning
     [rest_lo, rest_hi] is observed over [rest_lo*(1+z), rest_hi*(1+z)]. Both
     edges move redward with z, so across a redshift grid the tightest blue edge
     is at max(z) and the tightest red edge is at min(z). A filter has to sit
@@ -239,19 +237,11 @@ def check_filters_fit_k15_templates(file, filter_names=DEFAULT_FILTERS,
       plausible-looking magnitude that is systematically too faint. Nothing is
       NaN, nothing raises, and every downstream color is quietly wrong. This is
       the failure worth failing fast on.
-
-    The K15 libraries all start at 2.0 um rest-frame, which is why nothing
-    blueward of roughly 3 um observed can be used with them at z >= 0.5.
     """
-    wavelengths, _fluxes, _errors = load_k15_data(file)
-    rest_lo, rest_hi = float(np.min(wavelengths)), float(np.max(wavelengths))
-
     z = np.asarray(redshifts, dtype=float)
     z_lo, z_hi = float(z.min()), float(z.max())
     obs_lo = rest_lo * (1.0 + z_hi)
     obs_hi = rest_hi * (1.0 + z_lo)
-
-    name_for_message = Path(file).name
 
     for name in filter_names:
         filt_lo, filt_hi = (float(v) for v in ReadFilter(name).wavelength_range())
@@ -269,12 +259,51 @@ def check_filters_fit_k15_templates(file, filter_names=DEFAULT_FILTERS,
 
         raise ValueError(
             f"{name} ({filt_lo:.3f}-{filt_hi:.3f} um) is not covered by "
-            f"{name_for_message} over z={z_lo:g}-{z_hi:g}: the template spans "
+            f"{template_name} over z={z_lo:g}-{z_hi:g}: the template spans "
             f"{rest_lo:.3f}-{rest_hi:.1f} um rest-frame, which is observed as "
             f"{obs_lo:.3f}-{obs_hi:.1f} um across that redshift range. {detail} "
             "Drop this filter, or use a template library with wider rest-frame "
             "coverage."
         )
+
+
+def check_filters_fit_k15_templates(file, filter_names=DEFAULT_FILTERS,
+                                    redshifts=DEFAULT_REDSHIFTS):
+    """Raise ValueError for any filter the redshifted K15 template cannot cover.
+
+    The galaxy-side counterpart to planets.check_filters_fit_model. Without it a
+    coverage mismatch is silent at the point of failure and only surfaces much
+    later as something unrecognizable -- adding 2MASS/2MASS.Ks produced
+    "LinAlgError: SVD did not converge" from np.linalg.matrix_rank, a hundred
+    lines downstream, because the NaN magnitudes rode along in X until something
+    finally tried to factor it.
+
+    The K15 libraries all start at 2.0 um rest-frame, which is why nothing
+    blueward of roughly 3 um observed can be used with them at z >= 0.5. See
+    _check_filters_fit_template for the redshift geometry and the two failure
+    modes.
+    """
+    wavelengths, _fluxes, _errors = load_k15_data(file)
+    _check_filters_fit_template(
+        float(np.min(wavelengths)), float(np.max(wavelengths)),
+        filter_names, redshifts, Path(file).name)
+
+
+def check_filters_fit_swire_templates(file, filter_names=DEFAULT_FILTERS,
+                                      redshifts=DEFAULT_REDSHIFTS):
+    """Raise ValueError for any filter the redshifted SWIRE template cannot cover.
+
+    The SWIRE counterpart to check_filters_fit_k15_templates. The Polletta+2007
+    templates span ~0.1-6000 um rest-frame, so for the 2MASS/WISE set this never
+    actually fires -- but the silent partial-overlap failure it guards against
+    is still reachable with a narrow template or an extreme redshift grid, and
+    the galaxy_magnitudes_swire cache would otherwise hand back a column of
+    plausible, systematically wrong magnitudes with nothing raised.
+    """
+    wavelengths, _fluxes = load_swire_data(file)
+    _check_filters_fit_template(
+        float(np.min(wavelengths)), float(np.max(wavelengths)),
+        filter_names, redshifts, Path(file).name)
 
 
 def get_full_redshift_mag_loop_k15(file, filter_names=DEFAULT_FILTERS, redshifts=DEFAULT_REDSHIFTS):

@@ -535,4 +535,98 @@ Basically, the gmm we created stays solid at BA = 1 up until you get a variance 
 
  With this data, we can now go to Zac and talk about what we want to do with Red Dragon, as it helps with errors by using extreme deconvolution. 
 
- 
+ ## 2026-09-03
+
+ I had a productive meeting with Zac where we got some clarity on next steps for the project. Because of the training data Zac is working with, we need to try to get the 2MASS and WISE filters running, to see if we can get some separation. 
+
+ We'll also need to make sure that we have models and galaxy data that cover those filters. From my previous experiments, we don't have those, at least with our current brown dwarfs. We may be able to use the SWIRE templates for galaxies. My plan is to do the following. 
+
+ 1. Get set up with an ORCID (Zac requested I do this if we're making a research note) (Done: 2026-09-03)
+ 2. Get an openleaf account (Also a Zac request) (Done: 2026-09-03)
+ 3. Do a deep dive on the wavelength areas that those filters come from, so we have a baseline of what data we need to grab. I believe that we will need to use a different brown dwarf model. 
+ 4. Double check the SWIRE templates to make sure that we have enough data to handle this. 
+ 5. Create a new folder testing a similar method to our pop separation. 
+
+### Table of Target Filters
+| Filter Name | Min (micron) | Max (micron) | Notes |
+|----- | -----| ----- | ---- |
+| 2MASS/2MASS.J | 1.06905 | 1.4208 | |
+| 2MASS/2MASS.H | 1.4465 | 1.8277 | |
+| 2MASS/2MASS.Ks | 1.9402 | 2.3810 | |
+| WISE/WISE.W1 | 3.3526 | 3.8723 | |
+| WISE/WISE.W2 | 3.9633 | 5.3413 | |
+| WISE/WISE.W3 | 7.4430 | 17.2613 | Probably out of range |
+| WISE/WISE.W4 | 19.5200 | 27.9107 | Waaaay out of range |
+
+### Models that I can use?
+
+So I'm looking at the Sonora Bobcat model paper, and it mentions having data for the 2MASS system. I'll have claude dig into the code, to see what we've actually downloaded. 
+
+And we have a winner. Looks like the wavelength range is 0.4 to 50 um. So we will probably be able to still use Bobcat. However, I also know that's not the best, most up to date table, especally for what we're trying to do, as it doesn't deal with any temperture gradient chemistry like Elf Owl did. 
+
+
+Ok, Elf Owl is 0.6 to 15um. We might be able to use Elf Owl again. 
+
+I want to check one additional model, which was recommended by Ashley Messier. The Exo-REM k26 model, which is extreamly new. In the readme to the grid, there's a specific listing saying to hold off publishing until the Radcliffe paper is online. This is one that gets more interesting. They have three grids, low, medium, and high res, with ranges below. 
+
+Low: 0.333 - 250 um
+Medium: 0.9 - 28.0 um
+High: 0.9 - 6.0 um
+
+That means it's a contender. However, in looking at the repository, there's a specific note asking to not publish on the model until the Radcliffe paper has been published. It's a good option if we ever want to have a model that can span the entire range of work. Overall, here's the pros/cons list.
+
+#### Sonora Bobcat (Marley et al. 2021)
+Pros
+- It's the default that we've been working with, and provides a good baseline for what we're trying to do. 
+- It's native in species, and cheap to load from a GB standpoint
+- It covers the range of filters and temps we want to cover
+- Simplifies chemistry, making it fully reproducible
+
+Cons
+- It only handles chemical equilibrium. This means we won't get the correct physics + chemestry for anything with vertical mixing, which is unfortunatly everything we're looking for. It'll bias the fluxes for the W1-W2. 
+- Cloudless, which is fine, but we'll miss some of the areas for the very cold dwarfs (<400 K)
+- 2021, which is an older model. Chemistry tables have been updated since then. 
+
+#### Sonora Elf Owl (Mukherjee et al. 2024)
+ Pros
+ - Disequilibrium chemistry is the main feature of the model. We get the log_kzz value as a free grid axis. 
+ - It's published, refereed, and looks like it's going to be a T/Y standard.
+ - Native in species library
+ - It has a very rich grid, with lots of knobs to test to get varying results
+ - With updated 2024 opacities, we have the range comfortably covered. 
+
+Cons
+- 275 K floor. We're going to miss some of the very cold Y dwarfs. We've got WISE 0855, which is about 250 K. 
+- 15 um max, so if we want to unify our work with the JWST filters, we'll need to use a different model (which is what we did already)
+- It's a beefy boy in the GB range. 69 GB RAM, and the logg=3.0 slice is all zeros. 
+- It's got some issues when pulling, and contains a more sparce grid, which means more interpolation. 
+- Cloudless, so we're not getting any H2O cloud lines. 
+
+#### Exo-REM k26 (Radcliffe et al. submitted 2026)
+Pros
+- It's the most recent model, which means it has the most recent physics + chem. After an internet search the Exo-REM models have been very good in the T/Y area around 3-5um. 
+- You can get temps down to 200 K, which means we have the full range, and won't miss anything. 
+- We can use the same model throughout the whole process, so if we wanted to showcase our JWST work, we could use the same model. 
+- It's got cloud treatment, which could be good if we go into the L/T transition. 
+- Widest composition coverage in the values we're able to simulate across M/H and C/O
+
+Cons
+- Not published, and has a note in the Readme asking not to reference until it is. 
+- It's also not in species, which means we'll need to patch it in directly using the provided .h5 file. 
+- Kinda beefy. Medium res is ~9 GB per 200 K T_eff group. 
+- Least externally validated. Without being published, we don't have as much confidence as we would like.
+- According to claude, the chemistry around some of the Fe/Si clouds won't effect the viewing in the low temps (275 - 550K), so having a cloudy model for those elements won't help anyway. 
+
+Based on this information, I'm going to go with the **Elf Owl** model. We already have it injested, it's native to species and still contains much of the area we want to separate on. Beyond that, it's also been tested deeply from independent reviewers, and we can publish a research note off of it. 
+
+After Radcliffe publishes + the model matures, I think it'll be a great follow up.
+
+So that's the dwarfs handled, let's look at the SWIRE templates. 
+
+We can't use the Dr. Pope data, because as you redshift, we lose the blue end of the data we need for those filters. We have the SWIRE templates, but I need to do some checks in the data to see how far they go wavelength wise in the blue. 
+
+Ok, so it looks like we're have the blues that we need from the templates, even with the redshift. Based on the data, the rest-frame goes from 0.10 - 6000 um. So we'll be able to have the data cover anything 2MASS through W2 up until about z = 10. 
+
+Let's have claude take a look at the data to make sure it doesn't see any gotchas with the format, hopefully we'll be able to do apples to apples here. 
+
+Success! I was able to have claude break out the redshift logic into it's own function. With that, I should be able to just use the available helper function to get some similar graphs + data. Adventure for tomorrow. 

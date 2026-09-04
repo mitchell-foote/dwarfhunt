@@ -40,9 +40,11 @@ import numpy as np
 from species.read.read_model import ReadModel
 
 from . import paths
-from .galaxies import (check_filters_fit_k15_templates, load_k15_data,
-                       redshift_k15_data, synth_mags,
-                       translate_k15_L_v_to_f_lambda, DEFAULT_REDSHIFTS)
+from .galaxies import (check_filters_fit_k15_templates,
+                       check_filters_fit_swire_templates, load_k15_data,
+                       load_swire_data, redshift_data, redshift_k15_data,
+                       synth_mags, translate_k15_L_v_to_f_lambda,
+                       DEFAULT_REDSHIFTS)
 from .planets import (filter_label, generate_planet_arrays,
                       update_planet_flux_and_magnitude)
 
@@ -220,6 +222,73 @@ def galaxy_magnitudes(template, filter_names, *, redshifts=DEFAULT_REDSHIFTS,
             red_wl, red_flux = redshift_k15_data(wavelengths, fluxes, z_value)
             translated = translate_k15_L_v_to_f_lambda(red_wl, red_flux)
             for label, (mag, _err) in zip(labels, synth_mags(red_wl, translated, wanted)):
+                cols[label].append(mag)
+        for label, values in cols.items():
+            columns[f"mag_{label}"] = np.asarray(values, dtype=float)
+        _save_entry(path, key, columns)
+    elif verbose:
+        print(f"galaxy magnitudes: cache hit ({path.name})")
+
+    return {k: v for k, v in columns.items()}
+
+
+def galaxy_magnitudes_swire(template, filter_names, *, redshifts=DEFAULT_REDSHIFTS,
+                            cache_dir=None, refresh=False, verbose=True):
+    """Redshift grid plus a mag_{label} column per filter for one SWIRE template.
+
+    The SWIRE counterpart to galaxy_magnitudes: identical cache mechanics, same
+    return shape, so both feed planets.color_pairs the same way. Two differences
+    from the K15 path:
+
+    - SWIRE .sed flux is already F_lambda (erg cm^-2 s^-1 A^-1, normalised at
+      5500 A per Polletta+2007), so there is no L_nu -> f_lambda translation
+      step. The absolute normalisation is arbitrary and that is fine here --
+      every number downstream is a colour, and a global scale cancels in a
+      magnitude difference.
+    - Coverage is checked with check_filters_fit_swire_templates. SWIRE spans
+      ~0.1-6000 um rest-frame so it will not fire for the 2MASS/WISE set, but
+      the guard still runs: a warm cache must not be a way to smuggle a
+      truncated bandpass past the check.
+
+    A distinct cache "kind" keeps SWIRE and K15 entries for a same-stemmed file
+    from ever colliding, even though the extensions (.sed vs .txt) already
+    differ.
+
+    Colors are not included -- build them with planets.color_pairs so both
+    populations go through the same primitive and the "A - B" keys line up.
+    """
+    cache_dir = Path(cache_dir) if cache_dir else default_cache_dir()
+    template = Path(template)
+    z = np.asarray(redshifts, dtype=float)
+    key = {
+        "version": CACHE_VERSION,
+        "kind": "galaxies-swire",
+        "template": template.name,
+        "redshifts": [float(z.min()), float(z.max()), int(z.size)],
+    }
+    path = cache_dir / f"galaxy_{template.stem}_{_key_digest(key)}.npz"
+
+    # Same reasoning as galaxy_magnitudes: coverage is a property of
+    # (filter, template, redshifts) and independent of the cache, so check
+    # before either branch or a cache hit would skip the guard.
+    check_filters_fit_swire_templates(template, filter_names, z)
+
+    columns = None if refresh else _load_entry(path, key)
+    if columns is None:
+        columns = {"redshift": z}
+
+    wanted = [n for n in filter_names if f"mag_{filter_label(n)}" not in columns]
+    if wanted:
+        if verbose:
+            print(f"computing galaxy magnitudes for {template.name}, "
+                  f"{len(wanted)} filter(s): "
+                  f"{', '.join(filter_label(n) for n in wanted)}")
+        wavelengths, fluxes = load_swire_data(template)
+        labels = [filter_label(n) for n in wanted]
+        cols = {label: [] for label in labels}
+        for z_value in z:
+            red_wl, red_flux = redshift_data(wavelengths, fluxes, z_value)
+            for label, (mag, _err) in zip(labels, synth_mags(red_wl, red_flux, wanted)):
                 cols[label].append(mag)
         for label, values in cols.items():
             columns[f"mag_{label}"] = np.asarray(values, dtype=float)
