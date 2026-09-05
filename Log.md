@@ -633,4 +633,26 @@ Success! I was able to have claude break out the redshift logic into it's own fu
 
 ## 2026-09-04
 
-Alright, new experiment time. 
+Alright, new experiment time. I'm going to drop it in `2mass-wise-separation`
+
+I was able to continue to combine the dwarf models, and use the SWIRE templates. Here's the results:
+
+For the 5 filters (J, H, Ks, W1, W2), we're getting a balanced accuracy on the holdout of 0.9688. Pretty good, but not 1.000. However, we did the color filter search, and we got the following result. 
+
+| search | holdout | filters |
+|--- | --- | --- |
+| 0.9714 | 0.9729 | J+H+Ks |
+| 0.9695 | 0.9208 | J+H+Ks+W1 |
+| 0.9669 | 0.9688 | J+H+Ks+W1+W2 |
+| 0.9658 | 0.9708 | J+H+Ks+W2 |
+| 0.9609 | 0.9769 | J+Ks+W1+W2 |
+
+So we have a good range up in the 0.96 area. 
+
+I want to try one more thing, and add the W3 filter to see if we get any additional separation. To do that, we'll need to increase the range of the values pulled in from elfowl. Let's do a test and see waht happens. 
+
+My hypothesis is that we'll see a little more separation, as we go into the farther ir, we'll start to see more of the molecule lines. 
+
+Let's test it and find how how it does. 
+
+Ah, I just noticed that the W3 model goes too far into the red for elf owl. So we won't be able to add that. I think we're at a good stopping place now. Time to report our success to Zac, and take a look into integrating into Red Dragon. 
