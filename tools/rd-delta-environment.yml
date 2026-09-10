@@ -1,0 +1,30 @@
+# Conda environment for Red Dragon delta.
+#
+#   conda env create -f environment.yml
+#   conda activate rd-delta
+#
+# To update after editing this file:
+#   conda env update -f environment.yml --prune
+#
+# Note on pygmmis: it is NOT packaged on conda-forge (PyPI only), so it has to
+# come through the pip section below. Its compiled dependencies (numpy, scipy)
+# and its pure-python dependency parmap are installed by conda first so that
+# pip does not pull duplicate copies.
+name: rd-delta
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy>=2.0
+  - scipy>=1.7
+  - h5py>=3.0
+  - matplotlib-base>=3.5
+  - pandas>=1.3      # scripts/to_rd.py, scripts/plot_ra_dec.py
+  - parmap>=1.5.2    # pygmmis dependency; available on conda-forge
+  - pytest>=7.0
+  - pip
+  - pip:
+      - pygmmis>=1.2.2
+      # Install this repo itself, editable, so `import rd_delta` works from
+      # any directory. Drop the -e for a non-editable install.
+      - -e .

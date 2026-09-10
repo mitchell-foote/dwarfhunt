@@ -656,3 +656,24 @@ My hypothesis is that we'll see a little more separation, as we go into the fart
 Let's test it and find how how it does. 
 
 Ah, I just noticed that the W3 model goes too far into the red for elf owl. So we won't be able to add that. I think we're at a good stopping place now. Time to report our success to Zac, and take a look into integrating into Red Dragon. 
+
+## 2026-09-10
+Alright, Red Dragon time. I was able to reach out to William Black, and get one of the training files for the dwarf side of the house. I still don't have a galaxy model, but we'll tackle that as it comes. 
+
+I'm going to migrate some of the doc over from the red dragon repo that I've been working on. These are mainly just docs around how things work, and the next steps that we need to do to make everything work, and have a good product for Zac n'team.
+
+After that, I'll go through those steps in a basic manner so that it's listed in the log. 
+
+Ok! Migrated. 
+
+I had claude generate the rd_bridge.py file, which will allow us to better connect the format needed in the rd_delta project. This'll become important later. It also copied over some config files to allow for successful install of the project. There are a couple of bugs that claude recommended fixing in that repo, so until those get merged, I'm going to work on just connecting the repo locally. 
+
+Here's the list of TODOs with Red Dragon. 
+
+1. We need to test to see how good the `elf-owl` model stacks up to the training data that I got from William Black (person who created the red dragon project, recommended by Zac) 
+2. Add the `sonora-diamondback-highres` model to over the L sequence. This'll help us check to see if the failure cluser moves over. 
+3. Increase the redshifts up to z=8, to get more data and see how the galaxies respond. 
+4. (The big one) Build a galaxy model. We need to be able to compare apples to apples, and this repo doesn't include any prebuilt models for galaxies, so we need to be able to make one ourselves. This one I'm a little out of my depth on, so we'll be taking it slow, and making sure that I understand exactly what we're doing while we're doing it. I'll have claude build me some guardrails so that I don't fall into the common gotchas. 
+5. Build the classifier, and start doing some testing. 
+
+So let's get started. I'm going to place my red dragon specific work in my reddragon folder. 
