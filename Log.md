@@ -677,3 +677,65 @@ Here's the list of TODOs with Red Dragon.
 5. Build the classifier, and start doing some testing. 
 
 So let's get started. I'm going to place my red dragon specific work in my reddragon folder. 
+
+### Part 1, Verify Elf Owl to training data
+
+Ok, we've started by bringing out the data in the .h5, and we've found a quirk. They've specified err of 999 as a missing-data sentinel. After doing some searching from claude, it looks like most of the flaged data is at the tail end of those filters. However, some of those 999 values also have magnitudes associated with them. 
+
+I've made the decision to treat those values as missing. I can't verify whether those values are specific to a "redder than this" or something else from the data alone, so I'm going to mask them, and move forward. 
+
+Based on those masking (as well as taking out the NaNs + other missing data in the filters we need, we're left with this)
+
+```
+J:   49 masked ( 11 upper limits),  917 usable
+H:   94 masked ( 54 upper limits),  872 usable
+Ks:  104 masked ( 60 upper limits),  862 usable
+W1:   24 masked (  0 upper limits),  942 usable
+W2:   24 masked (  0 upper limits),  942 usable
+```
+
+## 2026-09-12
+
+I had a fun weekend, and during that weekend, I heard from Zac about a new AGN-DB website that has just been released. The paper for the project is https://arxiv.org/abs/2609.04322, and the associated website is https://alessandropeca.com/agndb.html. 
+
+Now, I know we'll need a new galaxy model for red dragon trained on these filters, but based on what I can see, this is a huge opportunity. Something around 8 million sources, across many ranges, including near IR in the filter bands I'm looking at. 
+
+However, It's beefy. So I'm going to have claude take a look at it, and see if it catches any disqualifications before I take a chance at downloading the data. 
+
+(Post Claude)
+
+It looks as if the AGN-DB might not be our saving grace, with a lot of the data not provided for our filter sets. I'll do a download later, but for now, I'm going to move forward with building a synthetic model. 
+
+## 2026-09-15
+
+I've started work on building out the method's section and abstract of my AAS research note. From what I have now, I'm going to go with the following abstract:
+
+```
+On noiseless synthetic MIRI photometry, the F1000W, F1065C, F1280W, and F1550C filters separate brown dwarfs from redshifted galaxies with a balanced accuracy of 1.000 on a held-out set drawn from the same templates. Upon adding Gaussian noise of σ mag per filter, a GMM trained on noiseless photometry first degrades between σ = .010 and .015, while a noisy photometry set first degrades between σ = .015 and .02. Both noiseless and noisy training sets both degrade to chance values around σ = 0.5.
+```
+
+## 2026-09-21
+
+I've worked through my methods section, and I found some inconsistencies in how I built out the hold out data set and the number of seeds that I'm expecting to run on that set. So I've gone through and rerun the data through with a larger seed pool, and have come out with the following numbers. 
+
+| sigma      |    noisy-train |        clean-train |    K  |  range | edge |
+|---|---|---|---|---|---|
+| 0.000   | 1.0000 +- 0.0000 | 1.0000 +- 0.0000 |   14  |12-17   |    0 |
+ 0.005   | 0.9994 +- 0.0018 | 1.0000 +- 0.0000 |   14 |  13-17    |   0
+ 0.010   | 1.0000 +- 0.0000 | 1.0000 +- 0.0000 |   13 | 11-16   |    0 |
+ 0.020   | 0.9993 +- 0.0023 | 1.0000 +- 0.0000 |   13 | 10-16    |   0 |
+ 0.050   | 0.9971 +- 0.0043 | 0.9960 +- 0.0036 |    9  | 8-12     |  0 |
+ 0.100   | 0.9819 +- 0.0112 | 0.9326 +- 0.0261 |    7  | 6-8    |    0 |
+ 0.150   | 0.9386 +- 0.0155 | 0.8337 +- 0.0279 |    5  | 4-7     |   0 |
+ 0.200   | 0.8961 +- 0.0226 | 0.7534 +- 0.0381 |    4  | 4-5      |  0 |
+ 0.300   | 0.7362 +- 0.0679 | 0.6458 +- 0.0236 |    2 |  2-4   |     12 |
+ 0.500   | 0.5707 +- 0.0627 | 0.5616 +- 0.0202 |    2  | 2-2    |   20 |
+
+This means that I need to modify my abstract with this new data. I'm not going to report the 0.005 and 0.020 on the noisy, because the variance isn't resolved from 1.000. 
+
+```
+On noiseless synthetic MIRI photometry, the F1000W, F1065C, F1280W, and F1550C filters separate brown dwarfs from redshifted galaxies with a balanced accuracy of 1.000 on a held-out set drawn from the same templates. Upon adding Gaussian noise of σ mag per filter, a GMM trained on noiseless photometry first degrades at σ = .050 while a noisy photometry set first degrades at σ = .100. Both noiseless and noisy training sets both degrade to chance values around σ = 0.5.
+```
+
+Now that I have that cleaned up, I'm going to start working on the Galaxy model for Zac. 
+
