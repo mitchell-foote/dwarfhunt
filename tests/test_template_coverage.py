@@ -12,7 +12,7 @@ announces itself where it happens:
   nothing raises, so every downstream color is quietly wrong.
 
 check_filters_fit_k15_templates is the galaxy-side counterpart to
-planets.check_filters_fit_model, and these lock in that it catches both.
+dwarfs.check_filters_fit_model, and these lock in that it catches both.
 check_filters_fit_swire_templates shares the same core and is exercised the
 same way -- its point is that the SWIRE library's ~0.1-6000 um rest-frame span
 is what makes the 2MASS/WISE set usable where K15's 2.0 um floor is not.

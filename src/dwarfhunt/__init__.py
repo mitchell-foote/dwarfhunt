@@ -3,11 +3,11 @@
 Nothing here imports species at module scope, so `import dwarfhunt` stays cheap
 and side-effect free. Call `init()` to attach to the shared database.
 
-The analysis modules -- planets, galaxies, gmm, plots -- do import species, so
+The analysis modules -- dwarfs, galaxies, gmm, plots -- do import species, so
 they are deliberately NOT pulled in here. Import them explicitly:
 
     import dwarfhunt
-    from dwarfhunt import planets, galaxies
+    from dwarfhunt import dwarfs, galaxies
 
     db = dwarfhunt.init()
 """

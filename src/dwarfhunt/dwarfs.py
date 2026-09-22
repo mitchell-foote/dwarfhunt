@@ -166,7 +166,7 @@ def load_deny_list(tags, db_path=None, path=None, rebuild=False):
     wholesale. An earlier version returned `json.loads(path.read_text())` as soon
     as the file existed, whatever had been asked for -- so once the file held the
     two Elf Owl tags, asking for any other tag handed back the Elf Owl entries
-    and no rescan happened. generate_planet_arrays then found no entry for its
+    and no rescan happened. generate_dwarf_arrays then found no entry for its
     model, applied no denial at all, and could sample a grid point with no
     spectrum; the only symptom was NaN magnitudes appearing much later.
 
@@ -179,7 +179,7 @@ def load_deny_list(tags, db_path=None, path=None, rebuild=False):
     live database -- see _grid_shape. Without this, re-adding a model (a
     narrower wavel_range for a different notebook, a re-extraction, an updated
     species version) would silently keep an old deny-list that might no longer
-    match: generate_planet_arrays' own consistency check only verifies the
+    match: generate_dwarf_arrays' own consistency check only verifies the
     deny-list is internally coherent, not that it still describes the grid
     that's actually being sampled from. A tag whose shape doesn't match is
     treated exactly like a tag that was never cached: rescanned, not warned
@@ -245,7 +245,7 @@ def skip_nearest_spec_check():
 
     i.e. it reads the whole ~818 MB flux dataset off disk and only then keeps
     the filter's handful of channels. So one get_flux or get_magnitude costs
-    about 26 GB of I/O, and one planet costs four of those.
+    about 26 GB of I/O, and one dwarf costs four of those.
 
     Measured on this grid: 10.7 s per call with the check, 0.0026 s without,
     and the returned flux and magnitude are bit-identical. All the check does
@@ -262,7 +262,7 @@ def skip_nearest_spec_check():
         read_model_module.check_nearest_spec = original
 
 
-def generate_planet_arrays(model: ReadModel, radius_range, distance=10, num_samples=200, deny=None, rng=None):
+def generate_dwarf_arrays(model: ReadModel, radius_range, distance=10, num_samples=200, deny=None, rng=None):
     model_bounds = model.get_bounds()
     model_points = model.get_points()
     generator = np.random.default_rng(rng) if rng is not None else np.random.default_rng()
@@ -294,14 +294,14 @@ def generate_planet_arrays(model: ReadModel, radius_range, distance=10, num_samp
     random_values['distance'] = np.full(num_samples, distance)
     return random_values
 
-def iter_planets(planet_arrays):
-      n = len(next(iter(planet_arrays.values())))
+def iter_dwarfs(dwarf_arrays):
+      n = len(next(iter(dwarf_arrays.values())))
       for i in range(n):
-          yield {key: float(val[i]) for key, val in planet_arrays.items()}
+          yield {key: float(val[i]) for key, val in dwarf_arrays.items()}
 
-def flux_and_abs_mag(reader: ReadModel, planet):
+def flux_and_abs_mag(reader: ReadModel, dwarf):
     # get_flux returns (flux, uncertainty) and the uncertainty is always None
-    band_flux = reader.get_flux(planet)[0]
+    band_flux = reader.get_flux(dwarf)[0]
 
     if not np.isfinite(band_flux) or band_flux <= 0.0: # type: ignore
         # a missing spectrum stored as zeros, get_magnitude would raise
@@ -309,7 +309,7 @@ def flux_and_abs_mag(reader: ReadModel, planet):
         return np.nan, np.nan
 
     # get_magnitude returns (apparent, absolute)
-    return band_flux, reader.get_magnitude(planet)[1] # type: ignore
+    return band_flux, reader.get_magnitude(dwarf)[1] # type: ignore
 
 
 def filter_label(filter_name):
@@ -420,12 +420,12 @@ def check_filters_fit_model(tag, filter_names, db_path=None):
             )
 
 
-def update_planet_flux_and_magnitude(
+def update_dwarf_flux_and_magnitude(
     model: ReadModel,
-    planet_arrays,
+    dwarf_arrays,
     filter_names=("JWST/MIRI.F1065C", "JWST/MIRI.F1140C"),
 ):
-    """Add per-filter flux_{label} and abs_mag_{label} columns to `planet_arrays`.
+    """Add per-filter flux_{label} and abs_mag_{label} columns to `dwarf_arrays`.
 
     filter_names can be any length -- pass all three MIRI coronagraph filters for
     Bobcat, or just the two that fit Elf Owl's narrower grid (see
@@ -443,21 +443,21 @@ def update_planet_flux_and_magnitude(
     mag_cols = {label: [] for label in labels}
 
     with skip_nearest_spec_check():
-        # get_flux/get_magnitude take one planet at a time, so walk the rows
-        for planet in iter_planets(planet_arrays):
+        # get_flux/get_magnitude take one dwarf at a time, so walk the rows
+        for dwarf in iter_dwarfs(dwarf_arrays):
             for reader, label in zip(readers, labels):
-                planet_flux, planet_mag = flux_and_abs_mag(reader, planet)
-                flux_cols[label].append(planet_flux)
-                mag_cols[label].append(planet_mag)
+                dwarf_flux, dwarf_mag = flux_and_abs_mag(reader, dwarf)
+                flux_cols[label].append(dwarf_flux)
+                mag_cols[label].append(dwarf_mag)
 
-    out = dict(planet_arrays)
+    out = dict(dwarf_arrays)
     for label in labels:
         out[f"flux_{label}"] = np.array(flux_cols[label])
         out[f"abs_mag_{label}"] = np.array(mag_cols[label])
 
     dropped = int(np.count_nonzero([np.isnan(out[f"abs_mag_{label}"]) for label in labels]))
     if dropped:
-        print(f"{model.model}: {dropped} planet/filter magnitudes had no usable spectrum and are gaps")
+        print(f"{model.model}: {dropped} dwarf/filter magnitudes had no usable spectrum and are gaps")
 
     return out
 
@@ -467,7 +467,7 @@ def color_pairs(mags_by_filter, order=None):
 
     mags_by_filter : dict, filter label -> magnitude (scalar or ndarray)
         e.g. {"F1065C": m1, "F1140C": m2, "F1550C": m3}. Works unchanged on scalars
-        (one galaxy template at one redshift) or ndarrays (a batch of planets),
+        (one galaxy template at one redshift) or ndarrays (a batch of dwarfs),
         since it's pure subtraction.
     order : sequence of labels, optional
         Pins the pair ordering. Defaults to mags_by_filter's insertion order, i.e.
@@ -485,60 +485,94 @@ def color_pairs(mags_by_filter, order=None):
     }
 
 
-def merge_planet_populations(populations, source_key="source_model"):
-    """Concatenate several planet-array dicts into one.
+def merge_dwarf_populations(populations, source_key="source_model"):
+    """Concatenate several dwarf-array dicts into one.
 
     populations : dict[str, dict[str, ndarray]]
         e.g. {"sonora-elfowl-t": elfowl_t, "sonora-elfowl-y": elfowl_y}, each
-        value shaped like planet_magnitudes' return: one 1-D array per column,
+        value shaped like dwarf_magnitudes' return: one 1-D array per column,
         every column the same length within that dict. Elf Owl's -t and -y
-        grids are the case this exists for -- same five parameters (teff,
-        logg, feh, c_o_ratio, log_kzz), non-overlapping teff axes
-        (575-1200 K vs 275-550 K) -- so merging them is just "the same kind
-        of row, twice," and downstream code (add_color_columns,
-        color_color_matrix, the GMM) should see one population, the way
-        bobcat_planets was one dict for a single model tag.
+        grids are the easy case -- same five parameters (teff, logg, feh,
+        c_o_ratio, log_kzz), non-overlapping teff axes (575-1200 K vs
+        275-550 K) -- so merging them is just "the same kind of row, twice,"
+        and downstream code (add_color_columns, color_color_matrix, the GMM)
+        should see one population, the way bobcat_dwarfs was one dict for a
+        single model tag.
     source_key : str
         Name of the added column recording which population each row came
         from. teff alone happens to disambiguate Elf Owl -t from -y since
         their axes don't overlap, but that's a property of this particular
-        pair of grids, not something worth relying on -- an explicit column
-        holds regardless of what's merged, and a "which dwarfs fail" plot can
-        color by family without re-deriving it from a temperature cut.
+        pair of grids, not something worth relying on -- Diamondback spans
+        900-2400 K and overlaps -t outright. An explicit column holds
+        regardless of what's merged, and a "which dwarfs fail" plot can color
+        by family without re-deriving it from a temperature cut.
 
-    Every population must expose exactly the same set of columns. This is
-    checked rather than merging on the intersection or padding the rest with
-    NaN: computing two calls with different filter_names (or a partially warm
-    cache) is exactly the kind of mismatch that should fail here, loudly,
-    rather than silently drop a filter from one side of the population or
-    hand back a column that is NaN for every -y row and nobody notices until
-    a plot looks wrong.
+    Two kinds of column, two different rules
+    ----------------------------------------
+    PHOTOMETRY columns (abs_mag_*, flux_*) must be present in every
+    population, and a mismatch raises. This is the check worth keeping: two
+    calls made with different filter_names, or against a partially warm cache,
+    differ exactly here, and concatenating them anyway would silently drop a
+    filter from one side of the population or leave a column that is NaN for
+    every -y row until a plot looks wrong months later.
+
+    PARAMETER columns may differ, and the union is taken, with NaN filling the
+    rows of any population that does not carry that axis. A grid's parameters
+    are a fact about the grid, not a mistake: Elf Owl is 5-parameter (teff,
+    logg, feh, c_o_ratio, log_kzz) and Diamondback is 4-parameter (teff, logg,
+    feh, fsed). Requiring those to match would mean either refusing to merge
+    the two families at all, or throwing away the cloud and chemistry axes that
+    distinguish them -- and those axes are the whole reason for sampling more
+    than one grid. Each population is still generated and photometered against
+    its own full parameter set; only the merge is widened, so nothing is lost
+    and `fsed` stays attached to the rows it actually describes.
+
+    Padding is reported on stdout rather than done silently, and a padded
+    column comes back as float64 even where the contributing grid stored it as
+    an integer, since NaN has no integer representation.
 
     Returns
     -------
-    dict, one array per shared column (concatenated in `populations`'
-    insertion order) plus `source_key` -> array of the tag string that
-    produced each row.
+    dict, one array per column (concatenated in `populations`' insertion
+    order, columns in first-seen order) plus `source_key` -> array of the tag
+    string that produced each row.
     """
     tags = list(populations)
     if not tags:
-        raise ValueError("merge_planet_populations needs at least one population")
+        raise ValueError("merge_dwarf_populations needs at least one population")
 
     key_sets = {tag: set(populations[tag]) for tag in tags}
-    all_keys = set.union(*key_sets.values())
 
-    mismatched = {tag: cols for tag, cols in key_sets.items() if cols != all_keys}
-    if mismatched:
+    # First-seen order across populations, so the merged dict's column order is
+    # reproducible. Iterating the union as a set would order columns by string
+    # hash, which PYTHONHASHSEED randomises per process -- harmless for the
+    # numbers, but it makes add_color_columns' filter_names=None default pick a
+    # different colour ordering run to run.
+    ordered_keys = []
+    for tag in tags:
+        for col in populations[tag]:
+            if col not in ordered_keys:
+                ordered_keys.append(col)
+    all_keys = set(ordered_keys)
+
+    photometry = {col for col in all_keys
+                  if col.startswith(("abs_mag_", "flux_"))}
+    missing_photometry = {tag: sorted(photometry - cols)
+                          for tag, cols in key_sets.items()
+                          if photometry - cols}
+    if missing_photometry:
         detail = "\n".join(
-            f"  {tag}: missing {sorted(all_keys - cols)}"
-            for tag, cols in mismatched.items()
+            f"  {tag}: missing {cols}"
+            for tag, cols in missing_photometry.items()
         )
         raise ValueError(
-            "populations do not share the same columns -- concatenating them "
-            "would silently drop whatever a shorter dict is missing instead "
-            f"of raising here, where it's traceable:\n{detail}\n"
+            "populations do not share the same photometry columns -- "
+            "concatenating them would silently drop whatever a shorter dict "
+            "is missing instead of raising here, where it's traceable:\n"
+            f"{detail}\n"
             "Compute every population with the same filter_names (and the "
-            "same cache state), or drop the extra columns before merging."
+            "same cache state) before merging. Differing PARAMETER columns "
+            "are fine and are unioned; only the photometry has to line up."
         )
 
     if source_key in all_keys:
@@ -549,21 +583,33 @@ def merge_planet_populations(populations, source_key="source_model"):
 
     n_per_tag = {tag: len(next(iter(populations[tag].values()))) for tag in tags}
 
-    merged = {
-        col: np.concatenate([np.asarray(populations[tag][col]) for tag in tags])
-        for col in all_keys
-    }
+    padded = {tag: sorted(all_keys - cols) for tag, cols in key_sets.items()
+              if all_keys - cols}
+    for tag, cols in padded.items():
+        print(f"{tag}: no {', '.join(cols)} axis on this grid -- "
+              f"padding {n_per_tag[tag]} rows with NaN")
+
+    merged = {}
+    for col in ordered_keys:
+        blocks = []
+        for tag in tags:
+            if col in key_sets[tag]:
+                blocks.append(np.asarray(populations[tag][col]))
+            else:
+                blocks.append(np.full(n_per_tag[tag], np.nan))
+        merged[col] = np.concatenate(blocks)
+
     merged[source_key] = np.concatenate(
         [np.full(n_per_tag[tag], tag, dtype=object) for tag in tags]
     )
     return merged
 
 
-def add_color_columns(planet_data, filter_names=None):
-    """Return a copy of `planet_data` with every pairwise color column added.
+def add_color_columns(dwarf_data, filter_names=None):
+    """Return a copy of `dwarf_data` with every pairwise color column added.
 
-    planet_data : dict
-        Output of update_planet_flux_and_magnitude (or anything with abs_mag_{label}
+    dwarf_data : dict
+        Output of update_dwarf_flux_and_magnitude (or anything with abs_mag_{label}
         keys). teff/logg/radius/flux_* etc. all pass through unchanged, so this stays
         one flat table per model -- what plotting and the eventual galaxy merge want.
     filter_names : list of filter labels, optional
@@ -572,34 +618,34 @@ def add_color_columns(planet_data, filter_names=None):
         in insertion order.
 
     Colors are differences, so this is safe to compare against the galaxy notebook's
-    apparent-magnitude colors even though planets here use absolute magnitude -- the
+    apparent-magnitude colors even though dwarfs here use absolute magnitude -- the
     distance modulus cancels either way.
     """
     prefix = "abs_mag_"
     if filter_names is None:
-        filter_names = [key[len(prefix):] for key in planet_data if key.startswith(prefix)]
+        filter_names = [key[len(prefix):] for key in dwarf_data if key.startswith(prefix)]
 
-    mags_by_filter = {label: planet_data[f"{prefix}{label}"] for label in filter_names}
+    mags_by_filter = {label: dwarf_data[f"{prefix}{label}"] for label in filter_names}
 
-    out = dict(planet_data)
+    out = dict(dwarf_data)
     out.update(color_pairs(mags_by_filter, order=filter_names))
     return out
 
 
-def color_color_matrix(planet_data, color_names=None):
-    """Stack this model's color columns into one (n_planets, n_colors) array.
+def color_color_matrix(dwarf_data, color_names=None):
+    """Stack this model's color columns into one (n_dwarfs, n_colors) array.
 
     add_color_columns leaves colors as separate dict entries ("F1065C - F1140C",
     "F1140C - F1550C", ...), convenient for name-based lookup but awkward for
     scatter code that wants to index by column position -- see
     michelson-galaxy-graph.ipynb's plot_color_color, which does exactly that
     against a per-galaxy [F1065-F1140, F1140-F1550, F1065-F1550] tuple. This is the
-    batched, planet-array equivalent: one row per planet instead of one tuple per
+    batched, dwarf-array equivalent: one row per dwarf instead of one tuple per
     galaxy/redshift, indexed the same way.
 
     Parameters
     ----------
-    planet_data : dict
+    dwarf_data : dict
         Output of add_color_columns -- needs one array per color, keyed "A - B".
     color_names : list of str, optional
         Which color columns to stack, and in what order, e.g.
@@ -611,27 +657,27 @@ def color_color_matrix(planet_data, color_names=None):
     -------
     color_names : list[str]
         Resolved column order -- color_names[j] labels colors[:, j].
-    colors : ndarray, shape (n_planets, n_colors)
+    colors : ndarray, shape (n_dwarfs, n_colors)
 
     Example
     -------
-    >>> names, colors = color_color_matrix(planet_colors)
+    >>> names, colors = color_color_matrix(dwarf_colors)
     >>> x = colors[:, names.index("F1065C - F1140C")]
     >>> y = colors[:, names.index("F1065C - F1550C")]
-    >>> ax.scatter(x, y, c=planet_colors["teff"], cmap="viridis")
+    >>> ax.scatter(x, y, c=dwarf_colors["teff"], cmap="viridis")
     """
     if color_names is None:
-        color_names = [key for key in planet_data if " - " in key]
+        color_names = [key for key in dwarf_data if " - " in key]
 
-    colors = np.column_stack([np.atleast_1d(planet_data[name]) for name in color_names])
+    colors = np.column_stack([np.atleast_1d(dwarf_data[name]) for name in color_names])
     return color_names, colors
 
 
 def check_power_law(predicted_flux: np.ndarray, actual_flux: np.ndarray):
     # predicted_flux and actual_flux cover the same wavelengths, so this is how far
     # apart they are as a fraction of the real value -- the check of whether the
-    # power law is a good fit. Broadcasts fine over the (n_planets, n_channels)
-    # batches that get_planet_spectra/predict_power_law produce.
+    # power law is a good fit. Broadcasts fine over the (n_dwarfs, n_channels)
+    # batches that get_dwarf_spectra/predict_power_law produce.
     residual = ((predicted_flux - actual_flux) / actual_flux)
     return residual
 
@@ -646,7 +692,7 @@ def _axis_indices(axis, values, tag, param, rtol=1e-9):
     value past the top end, which then raises a confusing out-of-bounds error far
     from the cause.
 
-    This function is only valid because generate_planet_arrays draws every
+    This function is only valid because generate_dwarf_arrays draws every
     parameter with np.random.choice over the grid's own axis values, so every
     requested value is expected to sit exactly on a node. If that assumption ever
     breaks, this raises instead of quietly lying.
@@ -668,32 +714,32 @@ def _axis_indices(axis, values, tag, param, rtol=1e-9):
         bad = np.unique(values[off_node])[:5]
         raise ValueError(
             f"{tag}: {int(off_node.sum())} value(s) for {param!r} are not on the "
-            f"model grid, e.g. {bad.tolist()}. get_planet_spectra indexes the grid "
-            "directly and cannot interpolate; sample with generate_planet_arrays, "
+            f"model grid, e.g. {bad.tolist()}. get_dwarf_spectra indexes the grid "
+            "directly and cannot interpolate; sample with generate_dwarf_arrays, "
             "or go through species.ReadModel.get_model instead."
         )
 
     return idx
 
 
-def get_planet_spectra(tag, planet_arrays, wavel_range=(0.61, 14.9), db_path=None):
-    """Read a batch of planet spectra straight out of the HDF5 grid, no species.
+def get_dwarf_spectra(tag, dwarf_arrays, wavel_range=(0.61, 14.9), db_path=None):
+    """Read a batch of dwarf spectra straight out of the HDF5 grid, no species.
 
-    generate_planet_arrays samples every parameter with np.random.choice against
-    the grid's own axis values, so each planet lands exactly on a grid node --
+    generate_dwarf_arrays samples every parameter with np.random.choice against
+    the grid's own axis values, so each dwarf lands exactly on a grid node --
     there's no interpolation to do. That makes it safe to skip
     species.ReadModel.get_data, which reads the *entire* ~818 MB flux dataset off
-    disk on every single call regardless of how many planets you ask for (see
+    disk on every single call regardless of how many dwarfs you ask for (see
     skip_nearest_spec_check's docstring for where that number comes from). Indexing
-    the array directly instead takes ~0.04s for 200 planets instead of tens of
+    the array directly instead takes ~0.04s for 200 dwarfs instead of tens of
     minutes.
 
     Parameters
     ----------
     tag : str
         Model tag, e.g. "sonora-elfowl-t".
-    planet_arrays : dict
-        Output of generate_planet_arrays: one array per grid parameter (all grid
+    dwarf_arrays : dict
+        Output of generate_dwarf_arrays: one array per grid parameter (all grid
         values, since these are sampled from the grid) plus 'radius' and 'distance'.
     wavel_range : (float, float)
         Wavelength window (um) to return, inclusive.
@@ -702,9 +748,9 @@ def get_planet_spectra(tag, planet_arrays, wavel_range=(0.61, 14.9), db_path=Non
     Returns
     -------
     wl : ndarray, shape (n_channels,)
-        Wavelengths (um) within `wavel_range`, shared by every planet.
-    flux : ndarray, shape (n_planets, n_channels)
-        Flux density at 10 pc scaled per planet by (radius/distance)**2, using the
+        Wavelengths (um) within `wavel_range`, shared by every dwarf.
+    flux : ndarray, shape (n_dwarfs, n_channels)
+        Flux density at 10 pc scaled per dwarf by (radius/distance)**2, using the
         same constants and formula as ReadModel.get_data so the two are
         bit-identical at a shared grid point.
     """
@@ -720,13 +766,13 @@ def get_planet_spectra(tag, planet_arrays, wavel_range=(0.61, 14.9), db_path=Non
         lo, hi = channel_idx[0], channel_idx[-1] + 1
         wl = wl_full[lo:hi]
 
-        n_planets = len(next(iter(planet_arrays.values())))
-        # each parameter's grid value -> its index along that axis, per planet
-        axis_idx = [_axis_indices(axes[param], planet_arrays[param], tag, param)
+        n_dwarfs = len(next(iter(dwarf_arrays.values())))
+        # each parameter's grid value -> its index along that axis, per dwarf
+        axis_idx = [_axis_indices(axes[param], dwarf_arrays[param], tag, param)
                     for param in params]
 
-        flux = np.empty((n_planets, hi - lo))
-        for i in range(n_planets):
+        flux = np.empty((n_dwarfs, hi - lo))
+        for i in range(n_dwarfs):
             # Build the index tuple from however many parameters this grid has.
             # Hardcoding five positions only ever worked for Elf Owl: bobcat is
             # 3-parameter (flux is 4-D) and diamondback is 4-parameter, and both
@@ -735,72 +781,72 @@ def get_planet_spectra(tag, planet_arrays, wavel_range=(0.61, 14.9), db_path=Non
 
     # (radius/distance)**2 scaling -- same formula and constants ReadModel.get_data
     # uses (read_model.py, "Apply (radius/distance)^2 scaling"), so a direct
-    # HDF5 read and a species get_data call agree bit-for-bit on the same planet.
-    scaling = (planet_arrays["radius"] * constants.R_JUP) ** 2 / (
-        planet_arrays["distance"] * constants.PARSEC
+    # HDF5 read and a species get_data call agree bit-for-bit on the same dwarf.
+    scaling = (dwarf_arrays["radius"] * constants.R_JUP) ** 2 / (
+        dwarf_arrays["distance"] * constants.PARSEC
     ) ** 2
     flux = flux * scaling[:, None]
 
     return wl, flux
 
 
-def get_planet_spectra_via_species(tag, planet_arrays, wavel_range=(0.61, 14.9)):
-    """Same interface and output as get_planet_spectra, but through species.ReadModel.get_data.
+def get_dwarf_spectra_via_species(tag, dwarf_arrays, wavel_range=(0.61, 14.9)):
+    """Same interface and output as get_dwarf_spectra, but through species.ReadModel.get_data.
 
     Exists purely to check the fast direct-HDF5 path agrees with species -- not for
     routine use. get_data reads the *entire* ~818 MB flux dataset off disk on every
-    call regardless of how many planets you ask for, so this costs ~18s for 200
-    planets on one grid, vs get_planet_spectra's ~0.03s. It does not need
+    call regardless of how many dwarfs you ask for, so this costs ~18s for 200
+    dwarfs on one grid, vs get_dwarf_spectra's ~0.03s. It does not need
     skip_nearest_spec_check: that guards check_nearest_spec, which only runs inside
     get_model, not get_data.
 
     Returns
     -------
     wl : ndarray, shape (n_channels,)
-    flux : ndarray, shape (n_planets, n_channels)
+    flux : ndarray, shape (n_dwarfs, n_channels)
     """
     model = ReadModel(tag, wavel_range=wavel_range)
-    n_planets = len(next(iter(planet_arrays.values())))
+    n_dwarfs = len(next(iter(dwarf_arrays.values())))
 
     # species pads a few extra points past wavel_range on each side (for
     # filter-profile resampling); trim back to the plain inclusive range
-    # get_planet_spectra uses so the two line up channel-for-channel.
+    # get_dwarf_spectra uses so the two line up channel-for-channel.
     wl_padded, _ = model.wavelength_points()
     keep = (wl_padded >= wavel_range[0]) & (wl_padded <= wavel_range[1])
     wl = wl_padded[keep]
 
-    flux = np.empty((n_planets, wl.size))
-    for i, planet in enumerate(iter_planets(planet_arrays)):
-        flux[i] = model.get_data(planet).flux[keep]
+    flux = np.empty((n_dwarfs, wl.size))
+    for i, dwarf in enumerate(iter_dwarfs(dwarf_arrays)):
+        flux[i] = model.get_data(dwarf).flux[keep]
 
     return wl, flux
 
 
 def fit_power_law(wl, flux, fit_range):
-    """Fit flux = 10**intercept * wl**slope per planet, in log-log space.
+    """Fit flux = 10**intercept * wl**slope per dwarf, in log-log space.
 
-    Vectorized across planets: np.polyfit accepts a 2-D `y`, one column per
-    planet, and returns coefficients shaped (2, n_planets).
+    Vectorized across dwarfs: np.polyfit accepts a 2-D `y`, one column per
+    dwarf, and returns coefficients shaped (2, n_dwarfs).
 
     Parameters
     ----------
     wl : ndarray, shape (n_channels,)
-    flux : ndarray, shape (n_planets, n_channels)
+    flux : ndarray, shape (n_dwarfs, n_channels)
     fit_range : (float, float)
         Wavelength window (um) to fit on.
 
     Returns
     -------
-    slope, intercept : ndarray, shape (n_planets,)
-        NaN for any planet whose fit window contains a non-positive or
+    slope, intercept : ndarray, shape (n_dwarfs,)
+        NaN for any dwarf whose fit window contains a non-positive or
         non-finite flux value (log10 would be undefined for it).
     """
     mask = (wl >= fit_range[0]) & (wl <= fit_range[1])
     fit_flux = flux[:, mask]
 
-    n_planets = flux.shape[0]
-    slope = np.full(n_planets, np.nan)
-    intercept = np.full(n_planets, np.nan)
+    n_dwarfs = flux.shape[0]
+    slope = np.full(n_dwarfs, np.nan)
+    intercept = np.full(n_dwarfs, np.nan)
 
     valid = np.all(np.isfinite(fit_flux) & (fit_flux > 0), axis=1)
     if np.any(valid):
@@ -811,15 +857,15 @@ def fit_power_law(wl, flux, fit_range):
 
 
 def predict_power_law(wl_target, slope, intercept):
-    """Evaluate a fitted power law at `wl_target` for every planet.
+    """Evaluate a fitted power law at `wl_target` for every dwarf.
 
-    Returns shape (n_planets, len(wl_target)); NaN rows propagate from a planet
+    Returns shape (n_dwarfs, len(wl_target)); NaN rows propagate from a dwarf
     that fit_power_law couldn't fit.
     """
     return 10 ** (intercept[:, None] + slope[:, None] * np.log10(wl_target)[None, :])
 
 
-def extrapolation_residuals(tag, planet_arrays, fit_range=(12.0, 14.0), test_range=(14.0, 14.9), db_path=None):
+def extrapolation_residuals(tag, dwarf_arrays, fit_range=(12.0, 14.0), test_range=(14.0, 14.9), db_path=None):
     """Fit a power law on `fit_range` and check it against real flux on `test_range`.
 
     This is the validation step: unlike the 14.9-16.6um region species can't cover
@@ -831,13 +877,13 @@ def extrapolation_residuals(tag, planet_arrays, fit_range=(12.0, 14.0), test_ran
     -------
     dict with:
         tag, wl_test : the test-range wavelengths
-        residual : ndarray (n_planets, n_test), see check_power_law
-        slope, intercept : ndarray (n_planets,), the fitted power law per planet
-        teff : ndarray (n_planets,), for coloring plots by temperature
+        residual : ndarray (n_dwarfs, n_test), see check_power_law
+        slope, intercept : ndarray (n_dwarfs,), the fitted power law per dwarf
+        teff : ndarray (n_dwarfs,), for coloring plots by temperature
     """
     db_path = db_path if db_path is not None else default_db_path()
 
-    wl, flux = get_planet_spectra(tag, planet_arrays, wavel_range=(fit_range[0], test_range[1]), db_path=db_path)
+    wl, flux = get_dwarf_spectra(tag, dwarf_arrays, wavel_range=(fit_range[0], test_range[1]), db_path=db_path)
 
     slope, intercept = fit_power_law(wl, flux, fit_range)
 
@@ -852,7 +898,7 @@ def extrapolation_residuals(tag, planet_arrays, fit_range=(12.0, 14.0), test_ran
         "residual": check_power_law(predicted, actual),
         "slope": slope,
         "intercept": intercept,
-        "teff": np.asarray(planet_arrays["teff"], dtype=float),
+        "teff": np.asarray(dwarf_arrays["teff"], dtype=float),
     }
 
 
@@ -861,11 +907,11 @@ def residual_by_teff(result):
 
     Works on any result dict shaped like extrapolation_residuals' output (needs just
     "residual" and "teff"), so the same call works for the Bobcat proxy check too.
-    generate_planet_arrays samples teff from the grid's own axis values, so grouping
+    generate_dwarf_arrays samples teff from the grid's own axis values, so grouping
     by the exact value recovers the grid's actual temperature steps rather than
     needing arbitrary bin edges.
 
-    For each teff, all (planet, wavelength) residuals at planets with that teff are
+    For each teff, all (dwarf, wavelength) residuals at dwarfs with that teff are
     pooled together -- same flattening extrapolation_residuals' aggregate stats use,
     just narrowed to one temperature at a time. Percentiles are of the signed
     residual (so median always falls between p16 and p84); p84 |residual| is kept
@@ -881,7 +927,7 @@ def residual_by_teff(result):
         r = residual_pct[teff == t]
         rows.append({
             "teff": float(t),
-            "n_planets": int(np.count_nonzero(teff == t)),
+            "n_dwarfs": int(np.count_nonzero(teff == t)),
             "p16 residual (%)": float(np.nanpercentile(r, 16)),
             "median residual (%)": float(np.nanmedian(r)),
             "p84 residual (%)": float(np.nanpercentile(r, 84)),
@@ -903,7 +949,7 @@ def wavelength_flux_power_law(wl, flux, fit_range, wl_ext_stop, n_ext=200):
     Parameters
     ----------
     wl : ndarray, shape (n_channels,)
-    flux : ndarray, shape (n_planets, n_channels)
+    flux : ndarray, shape (n_dwarfs, n_channels)
     fit_range : (float, float)
         Wavelength window (um) to fit the power law on.
     wl_ext_stop : float
@@ -926,12 +972,12 @@ def wavelength_flux_power_law(wl, flux, fit_range, wl_ext_stop, n_ext=200):
 
 
 def plot_extrapolation_residuals(result, title=None, ax=None):
-    """Plot one line per planet of extrapolation residual vs wavelength.
+    """Plot one line per dwarf of extrapolation residual vs wavelength.
 
     Colored by teff (viridis: perceptually uniform and colorblind-safe) so a
     temperature-correlated bias -- the kind already documented for the
     Rayleigh-Jeans extension -- would show up as banding rather than noise.
-    Median and 16th-84th percentile band summarize the ~200 individual planet
+    Median and 16th-84th percentile band summarize the ~200 individual dwarf
     lines, which are too dense to read on their own.
     """
     wl = result["wl_test"]
@@ -959,7 +1005,7 @@ def plot_extrapolation_residuals(result, title=None, ax=None):
     # trough puts `actual` near zero -- a real feature of the spectrum, not a bug --
     # so a handful of channels can blow out to 4-5 digit percentages and, left to
     # autoscale, crush every other channel to a flat line. Clip the view to a robust
-    # range instead; the individual planet lines still reach past it, so the extreme
+    # range instead; the individual dwarf lines still reach past it, so the extreme
     # channels are visible as lines running off the top/bottom, just not dictating the
     # scale everyone else is squeezed into.
     lo, hi = np.nanpercentile(residual_pct, [1, 99])

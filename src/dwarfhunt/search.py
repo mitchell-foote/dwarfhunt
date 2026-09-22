@@ -37,7 +37,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 
 from .gmm import GMMClassifier
-from .planets import color_pairs
+from .dwarfs import color_pairs
 
 
 def colour_names(labels):
@@ -48,8 +48,8 @@ def colour_names(labels):
     deliberately holds no species dependency -- the whole point of the cached
     magnitude tables is that a subset sweep is pure arithmetic. So the check
     lives one level up, where the full filter names still exist: run the filter
-    list through planets.put_filters_in_wavelength_order (or assert it with
-    planets.assert_wavelength_ordered) before deriving the labels handed here.
+    list through dwarfs.put_filters_in_wavelength_order (or assert it with
+    dwarfs.assert_wavelength_ordered) before deriving the labels handed here.
 
     Out of order, nothing raises -- the colours are still computed and still
     named, but some are the negative of what their name says.
@@ -59,22 +59,22 @@ def colour_names(labels):
     return [f"{blue} - {red}" for blue, red in zip(labels, labels[1:])]
 
 
-def subset_matrix(labels, planet_mags, galaxy_mags):
+def subset_matrix(labels, dwarf_mags, galaxy_mags):
     """Feature matrix for one filter subset, from cached magnitude dicts.
 
-    planet_mags : {label: ndarray} absolute magnitudes, one entry per filter
+    dwarf_mags : {label: ndarray} absolute magnitudes, one entry per filter
     galaxy_mags : list of {label: ndarray}, one dict per template
 
-    Rows stack planets first, then each template in order -- the same row
-    convention the notebook's n_planets offset relies on.
+    Rows stack dwarfs first, then each template in order -- the same row
+    convention the notebook's n_dwarfs offset relies on.
     """
     labels = list(labels)
     cols = colour_names(labels)
-    planet_cols = color_pairs({l: planet_mags[l] for l in labels}, order=labels)
+    dwarf_cols = color_pairs({l: dwarf_mags[l] for l in labels}, order=labels)
     galaxy_cols = [color_pairs({l: g[l] for l in labels}, order=labels)
                    for g in galaxy_mags]
     return np.column_stack([
-        np.concatenate([planet_cols[c]] + [g[c] for g in galaxy_cols])
+        np.concatenate([dwarf_cols[c]] + [g[c] for g in galaxy_cols])
         for c in cols])
 
 
@@ -120,7 +120,7 @@ def score_subset(X, y, *, k_candidates, reg_covar, n_seeds=10, test_size=0.3,
             "scores": scores, "k": ks, "n_at_edge": edges}
 
 
-def search_subsets(labels, planet_mags, galaxy_mags, y, *, sizes,
+def search_subsets(labels, dwarf_mags, galaxy_mags, y, *, sizes,
                    k_candidates, reg_covar, search_rows=None, n_seeds=10,
                    test_size=0.3, n_init=10, progress=None):
     """Rank every filter subset of the requested sizes.
@@ -137,7 +137,7 @@ def search_subsets(labels, planet_mags, galaxy_mags, y, *, sizes,
     results = []
     all_subsets = [s for m in sizes for s in combinations(labels, m)]
     for n, subset in enumerate(all_subsets, 1):
-        X = subset_matrix(subset, planet_mags, galaxy_mags)
+        X = subset_matrix(subset, dwarf_mags, galaxy_mags)
         y_use, X_use = (y, X) if search_rows is None else (y[search_rows], X[search_rows])
         stats = score_subset(X_use, y_use, k_candidates=k_candidates,
                              reg_covar=reg_covar, n_seeds=n_seeds,
@@ -162,7 +162,7 @@ def holdout_split(y, holdout_frac=0.3, random_state=0):
     return np.sort(pool), np.sort(holdout)
 
 
-def evaluate_on_holdout(subset, planet_mags, galaxy_mags, y, pool_rows,
+def evaluate_on_holdout(subset, dwarf_mags, galaxy_mags, y, pool_rows,
                         holdout_rows, *, k_candidates, reg_covar, n_init=10,
                         random_state=0):
     """Fit one subset on the whole search pool, score it once on the holdout.
@@ -170,7 +170,7 @@ def evaluate_on_holdout(subset, planet_mags, galaxy_mags, y, pool_rows,
     This is the only number that has not been selected on, and therefore the
     only one worth reporting.
     """
-    X = subset_matrix(subset, planet_mags, galaxy_mags)
+    X = subset_matrix(subset, dwarf_mags, galaxy_mags)
     k, clf, at_edge = select_k(X[pool_rows], y[pool_rows], k_candidates,
                                reg_covar, n_init=n_init, random_state=random_state)
     return {"subset": tuple(subset), "k": k, "k_at_edge": at_edge,

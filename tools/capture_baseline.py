@@ -35,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Fixed everywhere. Changing these invalidates an existing baseline.
 SEED = 0
-N_PLANETS = 50
+N_DWARFS = 50
 RADIUS_RANGE = (0.6, 1.3)
 DISTANCE = 10
 
@@ -56,15 +56,15 @@ def load_helpers():
     is what makes the before/after diff meaningful.
     """
     try:
-        from dwarfhunt import galaxies, gmm, planets, plots  # noqa: F401
+        from dwarfhunt import galaxies, gmm, dwarfs, plots  # noqa: F401
 
-        return {"planets": planets, "grids": planets, "colors": planets}
+        return {"dwarfs": dwarfs, "grids": dwarfs, "colors": dwarfs}
     except ImportError:
         sys.path.insert(0, str(REPO_ROOT / "michelson-repro"))
         import helpers.generate_planet_list as legacy
 
         # Pre-split, one module plays all three roles.
-        return {"planets": legacy, "grids": legacy, "colors": legacy}
+        return {"dwarfs": legacy, "grids": legacy, "colors": legacy}
 
 
 def make_rng():
@@ -78,7 +78,7 @@ def make_rng():
 
 
 def capture_sampling(h, db):
-    """The planet draw itself, per grid.
+    """The dwarf draw itself, per grid.
 
     Cheap, and the foundation under everything else: if the sampler drifts,
     every downstream number drifts with it and this pins down why.
@@ -89,11 +89,11 @@ def capture_sampling(h, db):
 
     for tag in GRIDS:
         model = ReadModel(tag)
-        arrays = h["planets"].generate_planet_arrays(
+        arrays = h["dwarfs"].generate_dwarf_arrays(
             model,
             radius_range=RADIUS_RANGE,
             distance=DISTANCE,
-            num_samples=N_PLANETS,
+            num_samples=N_DWARFS,
             rng=make_rng(),
         )
         for key, values in arrays.items():
@@ -114,7 +114,7 @@ def capture_spectra_agreement(h, db):
 
     for tag in GRIDS:
         model = ReadModel(tag)
-        arrays = h["planets"].generate_planet_arrays(
+        arrays = h["dwarfs"].generate_dwarf_arrays(
             model,
             radius_range=RADIUS_RANGE,
             distance=DISTANCE,
@@ -126,13 +126,13 @@ def capture_spectra_agreement(h, db):
         window = (lo, min(hi, 14.9))
 
         try:
-            wl, flux = h["grids"].get_planet_spectra(tag, arrays, wavel_range=window)
+            wl, flux = h["grids"].get_dwarf_spectra(tag, arrays, wavel_range=window)
             out[f"spectra/{tag}/wavelength"] = wl
             out[f"spectra/{tag}/flux"] = flux
         except (IndexError, ValueError) as exc:
             # Expected on 3-axis grids until the direct reader is generalised.
             # Recorded rather than raised so the baseline still captures.
-            print(f"  note: get_planet_spectra failed on {tag}: {exc}")
+            print(f"  note: get_dwarf_spectra failed on {tag}: {exc}")
 
     return out
 
@@ -146,8 +146,8 @@ def capture_photometry(h, db):
     """TODO: fluxes, absolute magnitudes and colours per grid.
 
     Sketch:
-        arrays = h["planets"].generate_planet_arrays(model, ..., rng=make_rng())
-        arrays = h["planets"].update_planet_flux_and_magnitude(model, arrays, MIRI)
+        arrays = h["dwarfs"].generate_dwarf_arrays(model, ..., rng=make_rng())
+        arrays = h["dwarfs"].update_dwarf_flux_and_magnitude(model, arrays, MIRI)
         table  = h["colors"].add_color_columns(arrays, MIRI)
         names, matrix = h["colors"].color_color_matrix(table)
         out["colors/<tag>/matrix"] = matrix

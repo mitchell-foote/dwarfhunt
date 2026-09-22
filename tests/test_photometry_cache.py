@@ -1,7 +1,7 @@
 """Guards on the cached magnitude tables.
 
 The failure this protects against is silent and expensive: reuse magnitudes that
-were computed against a DIFFERENT planet sample and nothing raises. The arrays
+were computed against a DIFFERENT dwarf sample and nothing raises. The arrays
 are still the right length, the column names still match, and every colour,
 every fit and every reported accuracy downstream is quietly wrong. Same shape as
 the config-seam bug, one layer up.
@@ -19,7 +19,7 @@ import pytest
 from dwarfhunt import paths
 from dwarfhunt.photometry import (_key_digest, _load_entry, _save_entry,
                                   galaxy_magnitudes, galaxy_magnitudes_swire,
-                                  planet_magnitudes)
+                                  dwarf_magnitudes)
 
 SAMPLE = dict(num_samples=12, radius_range=(0.6, 1.3), distance=10, rng=2)
 F1, F2, F3 = ("JWST/MIRI.F1065C", "JWST/MIRI.F1140C", "JWST/MIRI.F1550C")
@@ -29,16 +29,16 @@ J, KS = "2MASS/2MASS.J", "2MASS/2MASS.Ks"
 
 
 def test_cache_hit_returns_identical_arrays(tmp_path):
-    a = planet_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **SAMPLE)
-    b = planet_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **SAMPLE)
+    a = dwarf_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **SAMPLE)
+    b = dwarf_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **SAMPLE)
     for key in ("teff", "logg", "feh", "radius", "abs_mag_F1065C"):
         assert np.array_equal(a[key], b[key]), key
 
 
 def test_adding_a_filter_keeps_the_same_objects(tmp_path):
     """The whole point: a filter added later must describe the same sample."""
-    a = planet_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **SAMPLE)
-    b = planet_magnitudes("sonora-bobcat", [F1, F2], cache_dir=tmp_path, verbose=False, **SAMPLE)
+    a = dwarf_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **SAMPLE)
+    b = dwarf_magnitudes("sonora-bobcat", [F1, F2], cache_dir=tmp_path, verbose=False, **SAMPLE)
 
     for key in ("teff", "logg", "feh", "radius"):
         assert np.array_equal(a[key], b[key]), f"sample changed in {key}"
@@ -47,12 +47,12 @@ def test_adding_a_filter_keeps_the_same_objects(tmp_path):
 
 
 def test_different_sample_parameters_do_not_share_an_entry(tmp_path):
-    a = planet_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **SAMPLE)
+    a = dwarf_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **SAMPLE)
     other = dict(SAMPLE, num_samples=SAMPLE["num_samples"] + 1)
-    b = planet_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **other)
+    b = dwarf_magnitudes("sonora-bobcat", [F1], cache_dir=tmp_path, verbose=False, **other)
 
     assert len(a["teff"]) != len(b["teff"])
-    assert len(list(tmp_path.glob("planets_*.npz"))) == 2
+    assert len(list(tmp_path.glob("dwarfs_*.npz"))) == 2
 
 
 @pytest.mark.parametrize("changed", [
@@ -60,7 +60,7 @@ def test_different_sample_parameters_do_not_share_an_entry(tmp_path):
 ])
 def test_every_sample_parameter_changes_the_key(changed):
     """A parameter missing from the key is exactly how wrong magnitudes get reused."""
-    base = {"version": 1, "kind": "planets", "model": "sonora-bobcat",
+    base = {"version": 1, "kind": "dwarfs", "model": "sonora-bobcat",
             "num_samples": 12, "radius_range": [0.6, 1.3], "distance": 10.0,
             "rng": 2, "deny": None}
     other = dict(base)
@@ -78,13 +78,13 @@ def test_equivalent_integer_seeds_reach_one_entry(tmp_path):
     different sample" error above -- about a sample that was in fact identical.
     """
     seeded = {k: v for k, v in SAMPLE.items() if k != "rng"}
-    a = planet_magnitudes("sonora-bobcat", [F1], rng=2, cache_dir=tmp_path,
+    a = dwarf_magnitudes("sonora-bobcat", [F1], rng=2, cache_dir=tmp_path,
                           verbose=False, **seeded)
-    b = planet_magnitudes("sonora-bobcat", [F1], rng=np.int64(2), cache_dir=tmp_path,
+    b = dwarf_magnitudes("sonora-bobcat", [F1], rng=np.int64(2), cache_dir=tmp_path,
                           verbose=False, **seeded)
 
     assert np.array_equal(a["teff"], b["teff"])
-    assert len(list(tmp_path.glob("planets_*.npz"))) == 1, "seeds split the cache"
+    assert len(list(tmp_path.glob("dwarfs_*.npz"))) == 1, "seeds split the cache"
 
 
 @pytest.mark.parametrize("bad", [np.random.default_rng(2), None])
@@ -94,19 +94,19 @@ def test_a_seed_that_cannot_name_a_sample_is_refused(bad, tmp_path):
     drawn on every run, and the numbers would move with no signal at all."""
     seeded = {k: v for k, v in SAMPLE.items() if k != "rng"}
     with pytest.raises((TypeError, ValueError), match="integer seed"):
-        planet_magnitudes("sonora-bobcat", [F1], rng=bad, cache_dir=tmp_path,
+        dwarf_magnitudes("sonora-bobcat", [F1], rng=bad, cache_dir=tmp_path,
                           verbose=False, **seeded)
 
 
 def test_key_mismatch_on_read_raises(tmp_path):
     """Filename hashes are a convenience; the stored key is the source of truth."""
     path = tmp_path / "entry.npz"
-    _save_entry(path, {"kind": "planets", "num_samples": 12},
+    _save_entry(path, {"kind": "dwarfs", "num_samples": 12},
                 {"teff": np.arange(3.0)})
 
-    assert _load_entry(path, {"kind": "planets", "num_samples": 12}) is not None
+    assert _load_entry(path, {"kind": "dwarfs", "num_samples": 12}) is not None
     with pytest.raises(ValueError, match="different sample"):
-        _load_entry(path, {"kind": "planets", "num_samples": 13})
+        _load_entry(path, {"kind": "dwarfs", "num_samples": 13})
 
 
 def test_coverage_guard_fires_even_on_a_cache_hit(tmp_path):

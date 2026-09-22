@@ -1,9 +1,9 @@
 """Galaxy template helpers (SWIRE and Kirkpatrick+2015), moved out of
 michelson-galaxy-graph.ipynb.
 
-Mirrors planets.py's shape: load a template, redshift it, synthesize
+Mirrors dwarfs.py's shape: load a template, redshift it, synthesize
 per-filter magnitudes, then hand the magnitudes to that module's color_pairs so
-planets and galaxies compute colors the same way.
+dwarfs and galaxies compute colors the same way.
 
 Data only -- the drawing lives in color_color_plots.py.
 """
@@ -15,7 +15,7 @@ import numpy as np
 from species.phot.syn_phot import SyntheticPhotometry
 from species.read.read_filter import ReadFilter
 
-from .planets import color_pairs, filter_label
+from .dwarfs import color_pairs, filter_label
 
 DEFAULT_FILTERS = ("JWST/MIRI.F1065C", "JWST/MIRI.F1140C", "JWST/MIRI.F1550C")
 DEFAULT_REDSHIFTS = np.linspace(0.5, 2, 90)
@@ -118,12 +118,12 @@ def get_full_redshift_mag_loop(file, filter_names=DEFAULT_FILTERS, redshifts=DEF
 def galaxy_color_color_data(file, filter_names=DEFAULT_FILTERS, redshifts=DEFAULT_REDSHIFTS):
     """One call: load a SWIRE template and build every flux/color column across `redshifts`.
 
-    The galaxy-side equivalent of planets'
-    update_planet_flux_and_magnitude + add_color_columns pair, collapsed into one
+    The galaxy-side equivalent of dwarfs'
+    update_dwarf_flux_and_magnitude + add_color_columns pair, collapsed into one
     function since synth_mags is cheap (no ~818 MB HDF5 reads to batch around, unlike
-    the planet side). Colors go through the same color_pairs primitive planets use, so
+    the dwarf side). Colors go through the same color_pairs primitive dwarfs use, so
     the "A - B" keys line up and the result is a drop-in argument to
-    planets.color_color_matrix.
+    dwarfs.color_color_matrix.
 
     Parameters
     ----------
@@ -271,7 +271,7 @@ def check_filters_fit_k15_templates(file, filter_names=DEFAULT_FILTERS,
                                     redshifts=DEFAULT_REDSHIFTS):
     """Raise ValueError for any filter the redshifted K15 template cannot cover.
 
-    The galaxy-side counterpart to planets.check_filters_fit_model. Without it a
+    The galaxy-side counterpart to dwarfs.check_filters_fit_model. Without it a
     coverage mismatch is silent at the point of failure and only surfaces much
     later as something unrecognizable -- adding 2MASS/2MASS.Ks produced
     "LinAlgError: SVD did not converge" from np.linalg.matrix_rank, a hundred

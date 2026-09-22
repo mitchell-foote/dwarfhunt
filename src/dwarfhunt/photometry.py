@@ -1,8 +1,8 @@
-"""Cached per-filter magnitudes for the planet and galaxy populations.
+"""Cached per-filter magnitudes for the dwarf and galaxy populations.
 
 Why this exists
 ---------------
-update_planet_flux_and_magnitude walks one planet and one filter at a time, and
+update_dwarf_flux_and_magnitude walks one dwarf and one filter at a time, and
 galaxy_color_color_data_k15 walks one redshift and one filter at a time. Both
 therefore cost O(n_filters) -- but each filter is computed independently of the
 others, and colors are only differences of the results. So the expensive work
@@ -10,7 +10,7 @@ scales with the number of FILTERS, while the thing being studied is the number
 of filter SUBSETS. Computing magnitudes once and slicing turns a subset sweep
 from "recompute everything per subset" into pure arithmetic:
 
-    table = planet_magnitudes("sonora-bobcat", ALL_FILTERS, **sample)
+    table = dwarf_magnitudes("sonora-bobcat", ALL_FILTERS, **sample)
     # every subset below is now free
     for subset in combinations(ALL_FILTERS, 4):
         colors = add_color_columns(table, [filter_label(f) for f in subset])
@@ -20,7 +20,7 @@ Adding a filter later costs only that filter, not a full recompute.
 The cache key
 -------------
 The dangerous failure here is silent: reuse magnitudes computed against a
-DIFFERENT planet sample and nothing raises, the arrays are still the right
+DIFFERENT dwarf sample and nothing raises, the arrays are still the right
 shape, and every downstream number is quietly wrong -- the same shape of bug as
 the config seam that dwarfhunt.paths guards. So the key carries every input that
 changes the sample (model tag, num_samples, radius_range, distance, rng seed,
@@ -45,8 +45,8 @@ from .galaxies import (check_filters_fit_k15_templates,
                        load_swire_data, redshift_data, redshift_k15_data,
                        synth_mags, translate_k15_L_v_to_f_lambda,
                        DEFAULT_REDSHIFTS)
-from .planets import (filter_label, generate_planet_arrays,
-                      update_planet_flux_and_magnitude)
+from .dwarfs import (filter_label, generate_dwarf_arrays,
+                      update_dwarf_flux_and_magnitude)
 
 CACHE_VERSION = 1
 
@@ -121,12 +121,12 @@ def _save_entry(path, key, columns):
     np.savez(path, **payload)
 
 
-def planet_magnitudes(model_tag, filter_names, *, num_samples, radius_range,
+def dwarf_magnitudes(model_tag, filter_names, *, num_samples, radius_range,
                       rng, distance=10, deny=None, cache_dir=None,
                       refresh=False, verbose=True):
-    """Planet sample plus abs_mag_/flux_ columns for every filter in `filter_names`.
+    """Dwarf sample plus abs_mag_/flux_ columns for every filter in `filter_names`.
 
-    Returns the same flat dict shape update_planet_flux_and_magnitude produces,
+    Returns the same flat dict shape update_dwarf_flux_and_magnitude produces,
     so it drops straight into add_color_columns / color_color_matrix.
 
     The sample itself (teff, logg, feh, radius, distance) is cached alongside the
@@ -142,7 +142,7 @@ def planet_magnitudes(model_tag, filter_names, *, num_samples, radius_range,
     cache_dir = Path(cache_dir) if cache_dir else default_cache_dir()
     key = {
         "version": CACHE_VERSION,
-        "kind": "planets",
+        "kind": "dwarfs",
         "model": model_tag,
         "num_samples": int(num_samples),
         "radius_range": [float(radius_range[0]), float(radius_range[1])],
@@ -150,14 +150,14 @@ def planet_magnitudes(model_tag, filter_names, *, num_samples, radius_range,
         "rng": _normalise_seed(rng),
         "deny": _key_digest(deny) if deny else None,
     }
-    path = cache_dir / f"planets_{model_tag}_{_key_digest(key)}.npz"
+    path = cache_dir / f"dwarfs_{model_tag}_{_key_digest(key)}.npz"
 
     columns = None if refresh else _load_entry(path, key)
     model = None
 
     if columns is None:
         model = ReadModel(model_tag)
-        sample = generate_planet_arrays(
+        sample = generate_dwarf_arrays(
             model, radius_range=radius_range, distance=distance,
             num_samples=num_samples, deny=deny, rng=rng)
         columns = {k: np.asarray(v) for k, v in sample.items()}
@@ -166,18 +166,18 @@ def planet_magnitudes(model_tag, filter_names, *, num_samples, radius_range,
               if f"abs_mag_{filter_label(n)}" not in columns]
     if wanted:
         if verbose:
-            print(f"computing planet magnitudes for {len(wanted)} filter(s): "
+            print(f"computing dwarf magnitudes for {len(wanted)} filter(s): "
                   f"{', '.join(filter_label(n) for n in wanted)}")
         model = model if model is not None else ReadModel(model_tag)
         # Feed the cached sample back in, so new filters describe the same
         # objects as the columns already stored.
         sample = {k: v for k, v in columns.items() if not k.startswith(("abs_mag_", "flux_"))}
-        updated = update_planet_flux_and_magnitude(model, sample, wanted)
+        updated = update_dwarf_flux_and_magnitude(model, sample, wanted)
         for k, v in updated.items():
             columns[k] = np.asarray(v)
         _save_entry(path, key, columns)
     elif verbose:
-        print(f"planet magnitudes: cache hit ({path.name})")
+        print(f"dwarf magnitudes: cache hit ({path.name})")
 
     return {k: v for k, v in columns.items()}
 
@@ -186,7 +186,7 @@ def galaxy_magnitudes(template, filter_names, *, redshifts=DEFAULT_REDSHIFTS,
                       cache_dir=None, refresh=False, verbose=True):
     """Redshift grid plus a mag_{label} column per filter for one K15 template.
 
-    Colors are not included -- build them with planets.color_pairs so both
+    Colors are not included -- build them with dwarfs.color_pairs so both
     populations go through the same primitive and the "A - B" keys line up.
     """
     cache_dir = Path(cache_dir) if cache_dir else default_cache_dir()
@@ -237,7 +237,7 @@ def galaxy_magnitudes_swire(template, filter_names, *, redshifts=DEFAULT_REDSHIF
     """Redshift grid plus a mag_{label} column per filter for one SWIRE template.
 
     The SWIRE counterpart to galaxy_magnitudes: identical cache mechanics, same
-    return shape, so both feed planets.color_pairs the same way. Two differences
+    return shape, so both feed dwarfs.color_pairs the same way. Two differences
     from the K15 path:
 
     - SWIRE .sed flux is already F_lambda (erg cm^-2 s^-1 A^-1, normalised at
@@ -254,7 +254,7 @@ def galaxy_magnitudes_swire(template, filter_names, *, redshifts=DEFAULT_REDSHIF
     from ever colliding, even though the extensions (.sed vs .txt) already
     differ.
 
-    Colors are not included -- build them with planets.color_pairs so both
+    Colors are not included -- build them with dwarfs.color_pairs so both
     populations go through the same primitive and the "A - B" keys line up.
     """
     cache_dir = Path(cache_dir) if cache_dir else default_cache_dir()

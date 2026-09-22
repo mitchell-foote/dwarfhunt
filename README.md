@@ -19,7 +19,7 @@ including from inside a notebook in any experiment folder.
 
 ```python
 import dwarfhunt
-from dwarfhunt import planets, galaxies, plots, paths
+from dwarfhunt import dwarfs, galaxies, plots, paths
 
 db = dwarfhunt.init()          # attaches to the shared database
 ```
@@ -44,7 +44,7 @@ galaxies.galaxy_color_color_data_k15(
 ## Layout
 
 ```
-src/dwarfhunt/     paths, session, planets, galaxies, gmm, plots
+src/dwarfhunt/     paths, session, dwarfs, galaxies, gmm, plots
 data/              shared species database + ~160 GB of model grids  (gitignored)
 assets/            galaxy templates (SWIRE, Kirkpatrick+2015)
 cache/             derived caches, e.g. the missing-grid-point deny-list
