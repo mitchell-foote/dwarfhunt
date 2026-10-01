@@ -5,23 +5,19 @@ Brown dwarf / galaxy color-color analysis built on [`species`](https://species.r
 ## Start here
 
 **[`pop-separation/pop-separation.ipynb`](pop-separation/pop-separation.ipynb)**
-is the entry point for the work. It separates Sonora Bobcat brown dwarf models
-from Kirkpatrick+2015 galaxy templates in JWST/MIRI color space using a
-Gaussian-mixture classifier, and walks through, in order:
+is the entry point for the project. It separates Sonora Bobcat brown dwarf models from Kirkpatrick+2015 galaxy templates in JWST/MIRI color space using a Gaussian-mixture classifier, and walks through, in order:
 
-1. building the dwarf and galaxy color samples
-2. choosing the number of GMM components by BIC
-3. the confusion matrix and decision regions for each color pair
-4. which dwarfs (by T_eff) and galaxies (by redshift / AGN fraction) are misclassified
-5. whether each extra color improves balanced accuracy, paired across 20 splits
-6. a filter-subset search, scored once on a sealed holdout
-7. injected photometric noise, and the scatter at which separation breaks down
+1. Building the dwarf and galaxy color samples
+2. Choosing the number of GMM components by BIC
+3. The confusion matrix and decision regions for each color pair
+4. Which dwarfs (by T_eff) and galaxies (by redshift / AGN fraction) are misclassified
+5. Whether each extra color improves balanced accuracy, paired across 20 splits
+6. A filter-subset search, scored once on a sealed holdout
+7. Injected photometric noise, and the scatter at which separation breaks down
 
-The notebook is saved with its outputs, so you can read it without running
-anything. Re-running it needs the Sonora Bobcat grid in the species database
-(see Setup below).
+The notebook is saved with its outputs, so you can read it without running anything. Re-running it needs the Sonora Bobcat grid in the species database (see Setup below).
 
-The research narrative, including dead ends, lives in [Log.md](Log.md).
+The research log lives in [Log.md](Log.md).
 
 ## Setup
 
@@ -43,15 +39,11 @@ from dwarfhunt import dwarfs, galaxies, plots, paths
 db = dwarfhunt.init()          # attaches to the shared database
 ```
 
-`init()` generates `species_config.ini` at the repo root on first run, pointing
-at `data/species_database.hdf5`. That file holds absolute, machine-specific
-paths, so it is gitignored and regenerated per checkout —
-`species_config.ini.template` shows its shape.
+`init()` generates `species_config.ini` at the repo root on first run, pointing at `data/species_database.hdf5`. That file holds absolute, machine-specific paths, so it is gitignored and regenerated per checkout — `species_config.ini.template` shows its shape.
 
-Pass `force_species_init=True` before any **write** (`add_model`, `add_filter`,
-`add_photometry`, `add_companion`), and run those with no other kernels
-attached. `SpeciesInit` reopens the database in append mode on every call, so
-two kernels writing to one shared database will collide on the HDF5 writer lock.
+Pass `force_species_init=True` before any **write** (`add_model`, `add_filter`, `add_photometry`, `add_companion`), and run those with no other kernels attached. 
+
+`SpeciesInit` reopens the database in append mode on every call, so two kernels writing to one shared database will collide on the HDF5 writer lock.
 
 Galaxy templates resolve through the package rather than a cwd-relative string:
 
@@ -79,21 +71,12 @@ sprint-week/       early species tutorial work
 
 ## Working on the data
 
-**`data/` is ~160 GB and the volume runs near capacity. Move it with `mv`,
-never `cp`** — a rename is free, a copy will not fit.
+**`data/` directory can get ~160 GB with all downloads, so if you want to run the models locally, make sure you have space on your disk. 
 
-The `.tgz` archives in `data/` are not redundant with the extracted `.npy`
-directories beside them. `species.add_model` looks for the `.tgz` specifically
-and re-downloads it from Leiden when absent, so deleting them costs a ~74 GB
-download.
+The `.tgz` archives in `data/` are not redundant with the extracted `.npy` directories beside them. `species.add_model` looks for the `.tgz` specifically and re-downloads it from Leiden when absent, so deleting them costs a ~74 GB download.
 
 ## Tests
 
 ```bash
 pytest tests/
 ```
-
-These guard one specific silent failure: if `SPECIES_CONFIG` stops being
-exported, species falls back to `$CWD/species_config.ini`, auto-creates an empty
-database next to whatever notebook is running, and every number after that is
-computed against the wrong grid without raising anything.
