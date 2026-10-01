@@ -739,3 +739,57 @@ On noiseless synthetic MIRI photometry, the F1000W, F1065C, F1280W, and F1550C f
 
 Now that I have that cleaned up, I'm going to start working on the Galaxy model for Zac. 
 
+## 2026-09-22
+
+Ok, I've spent the day going through and having claude help me through building out a model with error bars for the galaxies. 
+
+One of the hardest parts, is assigning an apparent magnitude to the values. Based on some back and forth, we're running into an issue where we've selected W2 as a baseline for the galaxies, made an assumption of what they would potentally look like at that range, and then move backwards through wavelengths and redshifts to get spectra. 
+
+However, it turns out that if you do that, everything basically is invisible to the 2MASS filters. We know that's not the case, because we have surveys of galaxies in 2MASS, so we need to dig a bit deeper and make sure that we're basing our assumptions on the right values. One focus I'm having claude run down is if we need to build an AGN specific model. This'll separate us from resolve galaxies, but I think that's what the plan was anyway. A resolved galaxy and a dwarf look totally different, and wouldn't be confused with each other.   
+
+
+## 2026-09-23
+
+Ok, we have more information now. Here's the jist:
+
+In order to use red dragon, we need to create some error bars on our data, and in addition to this, we need to give each object an aparent magnitude, not an absoulte magnitude. 
+
+In order to do this, we take the model dwarfs and scatter them out to 30pc, uniform in volume (so more are farther out). With 10 draws each, we get 20,000 objects. 
+
+We then take the 9 AGN templates from the SWIRE library at 61 redshifts from z=0 to z=3, giving 549 template/redshift pairs. We then draw apparent W2 magnitudes from the AGN number-counts distribution, between W2=12 and 16, then added each template's colors to get the other four bands. 
+
+This caused a problem, because each filter has an upper limit on what mag they can detect. We can pull those values from th assoicated papers. Basically, we're restricted in which filters can actually capture our values. 
+
+Here's the breakdown of everything. 
+
+| | W2-detected | *and* all five bands | *and* J |
+|---|---|---|---|
+| dwarfs (equal L:T:Y weight) | 57.9% | **34.3%** | 38.9% |
+| AGN | 92.7% | **0.10%** | 0.24% |
+
+Which means that three out of five dwarfs W2 can see have no 2MASS photometry at all.
+
+AGNs are more agressive. `J - W2 ~ 4.4`, so if you want a J detection you neeed `J <= 15.8`, so we need `W2 <= 11.4`. Given our number-counts slope, only about .11% of the AGNs that W2 sees are that bright. 
+
+So basically, if you have a value in all 5 filter bands, you've basically got a pure dwarf selector.
+
+For the rest of the dwarfs, you have the following breakdown. 
+
+| grid | spectral type | W2-detected | five-band | J-detected |
+|---|---|---|---|---|
+| Diamondback | **L** | 100% | **65.0%** | 68.2% |
+| Elf Owl -t  | **T** | 78.0% | 2.3% | 9.6% |
+| Elf Owl -y  | **Y** | 16.9% | **0.0%** | 0.1% |
+
+So the five band sample is 97% L dwarfs. Looking at the rest of them, we have a two band sample of T and Y dwarfs. 
+
+However, if you look at just the W1-W2, you can get this breakdown. 
+
+| grid | n | mean W1 − W2 | AUC vs AGN | fraction kept by a `W1−W2 > 2.0` cut |
+|---|---|---|---|---|
+| Diamondback (L) | 1 270 | 1.32 | 0.587 | 19.7% |
+| Elf Owl -t (T)  | 5 639 | 1.77 | **0.768** | 44.8% |
+| Elf Owl -y (Y)  | 1 347 | 3.49 | **0.999** | 98.0% |
+| *(AGN, for reference)* | | 1.09 | | 3.8% admitted |
+
+So if you look at the table, the Y dwarfs are very, very red, which is good for us, because we can basically separate the coldest (Y) from that single measurement. Which makes the (T) dwarfs the ones we need to solve for. This is where we're going to test Red Dragon. 

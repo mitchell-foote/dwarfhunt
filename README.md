@@ -2,7 +2,26 @@
 
 Brown dwarf / galaxy color-color analysis built on [`species`](https://species.readthedocs.io).
 
-The research narrative lives in [Log.md](Log.md). This file is just setup.
+## Start here
+
+**[`pop-separation/pop-separation.ipynb`](pop-separation/pop-separation.ipynb)**
+is the entry point for the work. It separates Sonora Bobcat brown dwarf models
+from Kirkpatrick+2015 galaxy templates in JWST/MIRI color space using a
+Gaussian-mixture classifier, and walks through, in order:
+
+1. building the dwarf and galaxy color samples
+2. choosing the number of GMM components by BIC
+3. the confusion matrix and decision regions for each color pair
+4. which dwarfs (by T_eff) and galaxies (by redshift / AGN fraction) are misclassified
+5. whether each extra color improves balanced accuracy, paired across 20 splits
+6. a filter-subset search, scored once on a sealed holdout
+7. injected photometric noise, and the scatter at which separation breaks down
+
+The notebook is saved with its outputs, so you can read it without running
+anything. Re-running it needs the Sonora Bobcat grid in the species database
+(see Setup below).
+
+The research narrative, including dead ends, lives in [Log.md](Log.md).
 
 ## Setup
 
@@ -50,6 +69,8 @@ assets/            galaxy templates (SWIRE, Kirkpatrick+2015)
 cache/             derived caches, e.g. the missing-grid-point deny-list
 tests/             guards on the shared-config seam
 tools/             capture_baseline.py — exact before/after numeric diffs
+pop-separation/    ** entry point ** dwarf/galaxy separation in MIRI colors
+2mass-wise-separation/  follow-on: 2MASS + WISE filters, Elf Owl / Diamondback + SWIRE
 michelson-repro/   the Michelson reproduction (notebooks)
 broadband-filters/ 2MASS / GAIA / WISE profiles, pinned copies from SVO
 jwst_filters/      MIRI filter exploration
